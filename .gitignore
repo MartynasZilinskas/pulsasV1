@@ -1,0 +1,6 @@
+/.tmp/
+/.serena/
+/.aspire/
+**/bin/
+**/obj/
+**/TestResults/
