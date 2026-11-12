@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="HotChocolate.AspNetCore" />
+    <ProjectReference Include="../Contracts/Pulsas.PacketProcessing.Contracts.csproj" />
+  </ItemGroup>
+</Project>

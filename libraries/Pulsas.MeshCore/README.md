@@ -5,7 +5,7 @@ and **Funcky 3.8.0**. No MQTT, hosting, or database dependencies.
 
 ## Supported
 
-- Packet framing, preserving paths and unknown wire codes.
+- Packet encoding/decoding, preserving paths and unknown wire codes.
 - ADVERT encoding, decoding, Ed25519 signing/verification, and application data.
 - Group text encryption/decryption and four-byte ACK checksums.
 - Multipart/control wrapper headers with opaque bodies.
@@ -21,7 +21,7 @@ using Pulsas.MeshCore.Packets;
 byte[] wire = Convert.FromHexString("0D0000120012");
 string outcome = PacketCodec.Decode(wire)
     .Match(
-        left: error => $"Malformed frame: {error.Kind} (length {error.Length})",
+        left: error => $"Malformed packet: {error.Kind} (length {error.Length})",
         right: packet => $"{packet.PacketType}: {Convert.ToHexString(packet.Payload.AsSpan())}"
     );
 Console.WriteLine(outcome);
@@ -29,14 +29,14 @@ Console.WriteLine(outcome);
 
 ## API notes
 
-- `PacketCodec` handles packet framing and preserves payload bytes without
+- `PacketCodec` handles packet encoding/decoding and preserves payload bytes without
   interpreting them. Payload codecs accept payload bytes, not full packets.
   Packet decoding returns `Either<PacketDecodeError, MeshCorePacket>`; ACK
   decoding/encoding return `Either<AckError, ...>`. Both retain `TryDecode` adapters.
   Other structural decoders use `TryDecode`/throwing `Decode`; app-data and
   group-text decoding return explicit outcomes. Invalid construction outside the
-  ACK pilot, null ACK models, and native crypto failures can still throw.
-- Packet limits: 255-byte frame, 64-byte path, 184-byte payload, at most 63 path
+  ACK pilot and native crypto failures can still throw.
+- Packet limits: 255-byte packet, 64-byte path, 184-byte payload, at most 63 path
   entries. Decode preserves future versions and reserved width-four paths; inspect
   support flags before interpretation. TRACE path bytes are not ordinary hops.
 - Parsing ADVERTs does not verify signatures. A valid signature does not prove freshness,

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../PacketProcessing/Contracts/Pulsas.PacketProcessing.Contracts.csproj" />
+  </ItemGroup>
+</Project>

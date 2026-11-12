@@ -58,8 +58,4 @@ public class AckTests
                     .Match<object>(left: error => error, right: value => value)
             )
         );
-
-    [Fact]
-    public void Null_model_is_an_invalid_API_invocation() =>
-        Assert.Throws<ArgumentNullException>(() => AckCodec.Encode(null!));
 }

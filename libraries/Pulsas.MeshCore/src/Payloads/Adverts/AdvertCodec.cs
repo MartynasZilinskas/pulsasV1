@@ -43,7 +43,6 @@ public static class AdvertCodec
 
     public static byte[] GetSignedMaterial(AdvertPayload advert)
     {
-        ArgumentNullException.ThrowIfNull(advert);
         if (
             advert.PublicKey.IsDefault
             || advert.PublicKey.Length != 32
@@ -69,7 +68,6 @@ public static class AdvertCodec
         ReadOnlySpan<byte> appData
     )
     {
-        ArgumentNullException.ThrowIfNull(signer);
         var advert = new AdvertPayload(
             signer.PublicKey,
             timestamp,

@@ -12,10 +12,7 @@ public static class GroupTextCodec
 
     public static byte[] Encode(GroupTextMessage message, GroupChannelKey key)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(key);
         key.ThrowIfDisposed();
-        ArgumentNullException.ThrowIfNull(message.Text);
         if (message.Attempt > 3)
         {
             throw new ArgumentOutOfRangeException(nameof(message));
@@ -50,7 +47,6 @@ public static class GroupTextCodec
 
     public static GroupTextDecodeResult Decode(ReadOnlySpan<byte> payload, GroupChannelKey key)
     {
-        ArgumentNullException.ThrowIfNull(key);
         key.ThrowIfDisposed();
         if (
             payload.Length is < 19 or > PacketCodec.MaximumPayloadLength

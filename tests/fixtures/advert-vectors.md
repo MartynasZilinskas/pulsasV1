@@ -17,7 +17,7 @@ Signatures were generated independently of NSec using installed OpenSSL 3.6.5:
 4. Write `public_key || 01020304 || app_data` to `message.bin`.
 5. `openssl pkeyutl -sign -inkey seed.der -keyform DER -rawin -in message.bin`
    produces the detached signature.
-6. Frame is `1100 || public_key || 01020304 || signature || app_data`.
+6. Packet is `1100 || public_key || 01020304 || signature || app_data`.
 
 All scratch for generation belongs under the ignored repository `.tmp/`.
 

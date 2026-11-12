@@ -2,8 +2,8 @@ namespace Pulsas.MeshCore.Packets;
 
 public enum PacketDecodeErrorKind
 {
-    InvalidFrameLength,
-    TruncatedFraming,
+    InvalidPacketLength,
+    TruncatedPacket,
     InvalidPathLength,
     InvalidPayloadLength,
 }

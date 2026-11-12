@@ -27,7 +27,6 @@ public static class MultipartCodec
 
     public static byte[] Encode(MultipartPayload multipart)
     {
-        ArgumentNullException.ThrowIfNull(multipart);
         if (
             multipart.Remaining > 15
             || (byte)multipart.PayloadType > 15

@@ -28,7 +28,6 @@ public static class AckCodec
 
     public static Either<AckError, byte[]> Encode(AckPayload ack)
     {
-        ArgumentNullException.ThrowIfNull(ack);
         if (ack.Checksum.IsDefault)
         {
             return Either<AckError, byte[]>.Left(new(AckErrorKind.UninitializedChecksum));

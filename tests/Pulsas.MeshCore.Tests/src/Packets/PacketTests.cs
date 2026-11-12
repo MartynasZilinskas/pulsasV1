@@ -60,16 +60,16 @@ public class PacketTests
     }
 
     [Theory]
-    [InlineData("", PacketDecodeErrorKind.InvalidFrameLength, 0)]
-    [InlineData("11", PacketDecodeErrorKind.InvalidFrameLength, 1)]
-    [InlineData("1100", PacketDecodeErrorKind.InvalidFrameLength, 2)]
-    [InlineData("1000000000", PacketDecodeErrorKind.TruncatedFraming, 5)]
-    [InlineData("100000", PacketDecodeErrorKind.TruncatedFraming, 3)]
+    [InlineData("", PacketDecodeErrorKind.InvalidPacketLength, 0)]
+    [InlineData("11", PacketDecodeErrorKind.InvalidPacketLength, 1)]
+    [InlineData("1100", PacketDecodeErrorKind.InvalidPacketLength, 2)]
+    [InlineData("1000000000", PacketDecodeErrorKind.TruncatedPacket, 5)]
+    [InlineData("100000", PacketDecodeErrorKind.TruncatedPacket, 3)]
     [InlineData("100000000000", PacketDecodeErrorKind.InvalidPayloadLength, 0)]
     [InlineData("110100", PacketDecodeErrorKind.InvalidPayloadLength, 0)]
     [InlineData("11bf00", PacketDecodeErrorKind.InvalidPathLength, 189)]
     [InlineData("110300", PacketDecodeErrorKind.InvalidPayloadLength, -2)]
-    public void Rejects_truncated_or_inconsistent_frames(
+    public void Rejects_truncated_or_inconsistent_packets(
         string hex,
         PacketDecodeErrorKind kind,
         int length
@@ -84,7 +84,7 @@ public class PacketTests
         Assert.Equal(kind, error.Kind);
         Assert.Equal(length, error.Length);
         Assert.Equal(
-            kind == PacketDecodeErrorKind.TruncatedFraming ? 7 : (int?)null,
+            kind == PacketDecodeErrorKind.TruncatedPacket ? 7 : (int?)null,
             error.MinimumLength
         );
     }
@@ -150,9 +150,9 @@ public class PacketTests
     }
 
     [Fact]
-    public void Reports_oversized_frame() =>
+    public void Reports_oversized_packet() =>
         Assert.Equal(
-            new(PacketDecodeErrorKind.InvalidFrameLength, 256),
+            new(PacketDecodeErrorKind.InvalidPacketLength, 256),
             Assert.IsType<PacketDecodeError>(
                 PacketCodec
                     .Decode(new byte[256])

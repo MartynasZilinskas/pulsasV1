@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using MQTTnet;
@@ -6,10 +7,11 @@ using MQTTnet.Protocol;
 
 namespace Pulsas.Worker.ApiService;
 
-// Development transport check only: no decoding, trust decisions, or persistence.
+// Development-only transport and in-memory interpretation; no persistence.
 public class DummyMqttConsumer(
     IOptions<DummyMqttOptions> options,
-    ILogger<DummyMqttConsumer> logger
+    ILogger<DummyMqttConsumer> logger,
+    MqttPacketReportHandler packets
 ) : BackgroundService, IHealthCheck
 {
     private readonly IMqttClient client = new MqttClientFactory().CreateMqttClient();
@@ -130,13 +132,25 @@ public class DummyMqttConsumer(
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs args)
     {
-        logger.LogInformation(
-            "Dummy MQTT received {Topic}: {PayloadBytes} bytes, QoS {Qos}, retained {Retained}",
-            args.ApplicationMessage.Topic,
-            args.ApplicationMessage.Payload.Length,
-            args.ApplicationMessage.QualityOfServiceLevel,
-            args.ApplicationMessage.Retain
-        );
+        var arrivedAt = DateTimeOffset.UtcNow;
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.LogInformation(
+                "Dummy MQTT received {Topic}: {PayloadBytes} bytes, QoS {Qos}, retained {Retained}",
+                args.ApplicationMessage.Topic,
+                args.ApplicationMessage.Payload.Length,
+                args.ApplicationMessage.QualityOfServiceLevel,
+                args.ApplicationMessage.Retain
+            );
+        }
+        if (args.ApplicationMessage.Topic.EndsWith("/packets", StringComparison.Ordinal))
+        {
+            packets.Handle(
+                args.ApplicationMessage.Topic,
+                args.ApplicationMessage.Payload.ToArray(),
+                arrivedAt
+            );
+        }
         return Task.CompletedTask;
     }
 
@@ -147,7 +161,7 @@ public class DummyMqttConsumer(
         Task.FromResult(
             subscribed && client.IsConnected
                 ? HealthCheckResult.Healthy(
-                    "Dummy MQTT subscriptions are active; messages are logged only."
+                    "MQTT subscriptions are active; packet reports are interpreted in memory only."
                 )
                 : HealthCheckResult.Unhealthy("Dummy MQTT consumer is not subscribed.")
         );

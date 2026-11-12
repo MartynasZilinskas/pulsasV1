@@ -8,5 +8,6 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <ProjectReference Include="../../projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
+    <ProjectReference Include="../../projects/TrafficGenerator/Pulsas.TrafficGenerator.csproj" />
   </ItemGroup>
 </Project>

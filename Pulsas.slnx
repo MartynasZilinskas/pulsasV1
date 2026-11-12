@@ -1,5 +1,11 @@
 <Solution>
+  <Folder Name="/projects/PacketProcessing/">
+    <Project Path="projects/PacketProcessing/Contracts/Pulsas.PacketProcessing.Contracts.csproj" />
+    <Project Path="projects/PacketProcessing/Core/Pulsas.PacketProcessing.Core.csproj" />
+    <Project Path="projects/PacketProcessing/GraphQL/Pulsas.PacketProcessing.GraphQL.csproj" />
+  </Folder>
   <Folder Name="/projects/">
+    <Project Path="projects/Persistence/Pulsas.Persistence.csproj" />
     <Project Path="projects/AppHost/Pulsas.AppHost.csproj" />
     <Project Path="projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
     <Project Path="projects/Gateway.ApiService/Pulsas.Gateway.ApiService.csproj" />
@@ -10,6 +16,7 @@
     <Project Path="libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Pulsas.PacketProcessing.Tests/Pulsas.PacketProcessing.Tests.csproj" />
     <Project Path="tests/Pulsas.MeshCore.Tests/Pulsas.MeshCore.Tests.csproj" />
     <Project Path="tests/Pulsas.TrafficGenerator.Tests/Pulsas.TrafficGenerator.Tests.csproj" />
     <Project Path="tests/Pulsas.Worker.Tests/Pulsas.Worker.Tests.csproj" />

@@ -2,8 +2,11 @@
 
 Incremental migration of Pulsas. Includes a MeshCore codec library, local
 infrastructure, Worker/Gateway foundations, and an observer traffic generator.
-Worker has a dummy MQTT consumer; domain ingestion, storage, and GraphQL queries
-are not migrated yet.
+Worker interprets packet reports in memory; storage, chat linking, path assessment
+and domain GraphQL queries are not migrated yet.
+
+The [packet-processing project structure](projects/PacketProcessing/README.md)
+separates Contracts, Core, GraphQL, and Persistence.
 
 ## Run
 
@@ -23,7 +26,7 @@ certificate. Aspire **13.6.5** is pinned; no password or runtime exports are nee
 | Traffic status | http://localhost:5300/traffic/status |
 
 GraphQL currently exposes only `serviceInfo { name role }`. Worker's `/health`
-also checks its dummy MQTT subscription; `/alive` remains process-only. These
+also checks its MQTT subscription; `/alive` remains process-only. These
 checks do not establish domain ingestion readiness. Services are local development
 tools, not public deployments.
 
@@ -74,10 +77,15 @@ then start traffic. Open **worker → Logs** in the Aspire dashboard:
 ```text
 Dummy MQTT consumer subscribed to meshcore/VNO/+/status and meshcore/VNO/+/packets
 Dummy MQTT received meshcore/VNO/<observer>/packets: ... bytes, QoS AtLeastOnce, retained False
+Packet report interpreted in memory: observer ..., region VNO, packet Decoded, type Advert, payload Advert, advertiser ..., signature Verified, metadata Decoded; not stored
 ```
 
-This Development-only consumer logs topic, payload size, QoS, and retain flag—not
-payload contents. It does not decode, authenticate, deduplicate, or store reports.
+This Development-only consumer logs receipt metadata and interprets packet
+reports: validates observer/topic consistency, decodes packets and verifies ADVERT
+signatures while retaining partial metadata. Status messages remain receipt-only.
+Observer claims are not authenticated. Invalid reports are rejected; malformed
+packets and unknown payloads remain interpretation outcomes. No reports are stored,
+deduplicated, or notified to GraphQL. Logs omit raw report bytes and chat text.
 It requests QoS 1, retries connection/subscription failures every five seconds,
 and resubscribes after disconnects. Messages sent while disconnected can be lost;
 QoS 1 can deliver duplicates. Worker `/health` is unhealthy until subscribed.
@@ -96,7 +104,7 @@ has no QoS 1 cap; its authentication, authorization, filtering, and `/status`
 retain handling are **not** reproduced here. Use that broker for those behaviors.
 
 The standalone [MeshCore library](libraries/Pulsas.MeshCore/README.md) contains
-packet framing and payload codecs. It has no MQTT, hosting, or database dependency.
+packet encoding/decoding and payload codecs. It has no MQTT, hosting, or database dependency.
 
 ## Check changes
 

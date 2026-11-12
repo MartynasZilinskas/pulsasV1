@@ -29,7 +29,6 @@ public class GroupChannelKey : IDisposable
 
     public static GroupChannelKey FromHashtag(string name)
     {
-        ArgumentNullException.ThrowIfNull(name);
         if (name.Length < 2 || name[0] != '#')
         {
             throw new ArgumentException(

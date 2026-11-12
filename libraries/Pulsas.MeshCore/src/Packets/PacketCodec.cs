@@ -3,10 +3,10 @@ using Funcky.Monads;
 
 namespace Pulsas.MeshCore.Packets;
 
-// Handles packet framing; payload interpretation belongs to the payload codecs.
+// Handles packet encoding and decoding; payload interpretation belongs to the payload codecs.
 public static class PacketCodec
 {
-    public const int MaximumFrameLength = 255;
+    public const int MaximumPacketLength = 255;
     public const int MaximumPathLength = 64;
     public const int MaximumPayloadLength = 184;
 
@@ -21,10 +21,10 @@ public static class PacketCodec
 
     public static Either<PacketDecodeError, MeshCorePacket> Decode(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length is < 3 or > MaximumFrameLength)
+        if (bytes.Length is < 3 or > MaximumPacketLength)
         {
             return Either<PacketDecodeError, MeshCorePacket>.Left(
-                new(PacketDecodeErrorKind.InvalidFrameLength, bytes.Length)
+                new(PacketDecodeErrorKind.InvalidPacketLength, bytes.Length)
             );
         }
 
@@ -32,7 +32,7 @@ public static class PacketCodec
         if (bytes.Length <= offset)
         {
             return Either<PacketDecodeError, MeshCorePacket>.Left(
-                new(PacketDecodeErrorKind.TruncatedFraming, bytes.Length, offset + 2)
+                new(PacketDecodeErrorKind.TruncatedPacket, bytes.Length, offset + 2)
             );
         }
 
@@ -64,7 +64,6 @@ public static class PacketCodec
 
     public static byte[] Encode(MeshCorePacket packet)
     {
-        ArgumentNullException.ThrowIfNull(packet);
         if (
             packet.TransportCodes.IsDefault
             || packet.Path.IsDefault
@@ -86,9 +85,9 @@ public static class PacketCodec
             .. packet.Path,
             .. packet.Payload,
         ];
-        if (bytes.Length > MaximumFrameLength)
+        if (bytes.Length > MaximumPacketLength)
         {
-            throw new ArgumentException("MeshCore frame exceeds 255 bytes.", nameof(packet));
+            throw new ArgumentException("MeshCore packet exceeds 255 bytes.", nameof(packet));
         }
 
         return bytes;

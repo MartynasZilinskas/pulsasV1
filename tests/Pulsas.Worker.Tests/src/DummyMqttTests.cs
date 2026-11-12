@@ -5,6 +5,9 @@ using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Formatter;
 using MQTTnet.Protocol;
+using Pulsas.MeshCore.Cryptography;
+using Pulsas.PacketProcessing.Core.Processing;
+using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService;
 using Xunit;
 
@@ -34,10 +37,12 @@ public class DummyMqttTests
         var endpoint = Environment.GetEnvironmentVariable("PULSAS_WORKER_MQTT_ENDPOINT")!;
         Assert.True(Uri.TryCreate(endpoint, UriKind.Absolute, out var uri));
         Assert.True(uri.IsLoopback, "This opt-in test is restricted to a local broker.");
-        var logger = new CaptureLogger();
+        var logger = new CaptureLogger<DummyMqttConsumer>();
+        var processingLogger = new CaptureLogger<MqttPacketReportHandler>();
         using var consumer = new DummyMqttConsumer(
             Options.Create(new DummyMqttOptions { Endpoint = endpoint, Region = "TST" }),
-            logger
+            logger,
+            new MqttPacketReportHandler(new PacketProcessingManager(), processingLogger)
         );
         var context = new HealthCheckContext();
         Assert.Equal(
@@ -81,6 +86,31 @@ public class DummyMqttTests
                     await Task.Delay(25, token);
                 }
             }
+            using var sender = AdvertSigningKey.Generate();
+            var at = DateTimeOffset.UtcNow;
+            var identity = new ObserverIdentity(new string('a', 64), "synthetic-observer");
+            await publisher.PublishAsync(
+                new MqttApplicationMessageBuilder()
+                    .WithTopic($"meshcore/TST/{identity.PublicKey}/packets")
+                    .WithPayload(
+                        ObserverReports.Packet(
+                            identity,
+                            ObserverReports.CreateAdvert(sender, 1, at),
+                            at
+                        )
+                    )
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build(),
+                token
+            );
+            while (
+                !processingLogger.Messages.Any(message =>
+                    message.Contains("signature Verified") && message.Contains("not stored")
+                )
+            )
+            {
+                await Task.Delay(25, token);
+            }
             await publisher.DisconnectAsync(new MqttClientDisconnectOptions(), token);
         }
         finally
@@ -108,7 +138,7 @@ public class DummyMqttTests
         }
     }
 
-    private class CaptureLogger : ILogger<DummyMqttConsumer>
+    private class CaptureLogger<T> : ILogger<T>
     {
         public ConcurrentQueue<string> Messages { get; } = new();
 

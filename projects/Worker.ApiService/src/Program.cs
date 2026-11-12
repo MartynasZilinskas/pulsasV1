@@ -1,3 +1,5 @@
+using Pulsas.PacketProcessing.Contracts.Processing;
+using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.ServiceDefaults;
 using Pulsas.Worker.ApiService;
 
@@ -6,6 +8,8 @@ builder.AddServiceDefaults();
 
 if (builder.Environment.IsDevelopment())
 {
+    builder.Services.AddSingleton<IPacketProcessingManager, PacketProcessingManager>();
+    builder.Services.AddSingleton<MqttPacketReportHandler>();
     builder
         .Services.AddOptions<DummyMqttOptions>()
         .BindConfiguration("DummyMqtt")

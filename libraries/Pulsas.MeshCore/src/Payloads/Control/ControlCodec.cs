@@ -27,7 +27,6 @@ public static class ControlCodec
 
     public static byte[] Encode(ControlPayload control)
     {
-        ArgumentNullException.ThrowIfNull(control);
         if (control.Body.IsDefault || control.Body.Length > PacketCodec.MaximumPayloadLength - 1)
         {
             throw new ArgumentException("Invalid control wrapper body.", nameof(control));
