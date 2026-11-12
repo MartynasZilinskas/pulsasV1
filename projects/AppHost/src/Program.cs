@@ -8,6 +8,10 @@ var postgres = builder
     .WithDataVolume("pulsas-v1-postgres-data");
 var database = postgres.AddDatabase("pulsas", "pulsas_dev");
 
+// No database references until a service actually consumes persistence.
+builder.AddProject<Projects.Pulsas_Worker_ApiService>("worker").WithHttpHealthCheck("/health");
+builder.AddProject<Projects.Pulsas_Gateway_ApiService>("gateway").WithHttpHealthCheck("/health");
+
 if (builder.ExecutionContext.IsRunMode)
 {
     builder

@@ -1,9 +1,10 @@
 # PULSAS V1
 
 Incremental, reviewed migration from the existing `pulsas` application. The initial
-slice contains local Aspire orchestration only: PostgreSQL/PostGIS and Drizzle
-Studio. No Worker, Gateway, Web, application schema, MQTT connection, replay, or
-data import is included.
+foundation includes Aspire orchestration, PostgreSQL/PostGIS, Drizzle Studio,
+and runnable Worker and GraphQL Gateway hosts. No application schema, domain
+GraphQL API, MQTT connection, background jobs, Web, replay, or data import is
+included yet.
 
 ## Prerequisites
 
@@ -70,6 +71,48 @@ These volumes are separate from the reference project's
 generating a different password does not update an initialized database. Do not
 delete volumes as a restart or authentication workaround. Keep credentials,
 dashboard login tokens, and connection strings out of Git and shared logs.
+
+## Service foundations
+
+| Service | Local endpoint | Current behavior |
+| --- | --- | --- |
+| Gateway | `http://localhost:5100/graphql` | Operational `serviceInfo { name role }` query only |
+| Gateway IDE | `http://localhost:5100/graphql/ui/` | Embedded, development-only GraphQL browser |
+| Worker | `http://localhost:5200` | Operational host for future MQTT consumers and background tasks; no tasks registered yet |
+
+Both hosts use `libraries/Pulsas.ServiceDefaults` for OpenTelemetry logs,
+ASP.NET Core/HTTP request traces, runtime/request metrics, service discovery,
+HTTP client resilience, and development-only `/alive` and `/health` endpoints.
+Their health checks currently report **process health only**, not MQTT, database,
+or domain readiness. Health probes are excluded from request traces. Browse
+service logs, traces, and metrics in the Aspire dashboard.
+
+The hosts do not consume persistence yet, so they receive no database credentials
+and do not wait for PostgreSQL. Neither initializes schema or starts ingestion.
+The local unauthenticated endpoints are loopback-only; this is not a public
+deployment or authentication configuration.
+
+For example, from a separate terminal while Aspire is running:
+
+```sh
+curl -H 'Content-Type: application/json' \
+  --data '{"query":"{ serviceInfo { name role } }"}' \
+  http://localhost:5100/graphql
+```
+
+## Formatting and build checks
+
+CSharpier **1.4.0** is pinned in the repository-local .NET tool manifest. Restore
+it once, then use the same formatter for source and supported project files:
+
+```sh
+mise exec -- dotnet tool restore
+mise exec -- dotnet csharpier format . --include-generated
+mise exec -- dotnet csharpier check . --include-generated
+mise exec -- dotnet build Pulsas.slnx --no-restore
+```
+
+Build outputs, local Aspire/Serena state, and `.tmp` are excluded from formatting.
 
 Drizzle has database write access: treat it as a private local development tool,
 not a public endpoint or a production database browser. This setup does not apply

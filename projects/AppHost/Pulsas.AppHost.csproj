@@ -10,5 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <ProjectReference Include="../Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
+    <ProjectReference Include="../Gateway.ApiService/Pulsas.Gateway.ApiService.csproj" />
   </ItemGroup>
 </Project>

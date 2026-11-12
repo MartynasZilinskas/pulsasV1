@@ -1,5 +1,10 @@
 <Solution>
   <Folder Name="/projects/">
     <Project Path="projects/AppHost/Pulsas.AppHost.csproj" />
+    <Project Path="projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
+    <Project Path="projects/Gateway.ApiService/Pulsas.Gateway.ApiService.csproj" />
+  </Folder>
+  <Folder Name="/libraries/">
+    <Project Path="libraries/Pulsas.ServiceDefaults/Pulsas.ServiceDefaults.csproj" />
   </Folder>
 </Solution>
