@@ -15,6 +15,15 @@ builder.AddProject<Projects.Pulsas_Gateway_ApiService>("gateway").WithHttpHealth
 if (builder.ExecutionContext.IsRunMode)
 {
     builder
+        .AddContainer("mqtt", "docker.io/library/eclipse-mosquitto", "2.0.22")
+        .WithBindMount(
+            "configuration/mosquitto.conf",
+            "/mosquitto/config/mosquitto.conf",
+            isReadOnly: true
+        )
+        .WithEndpoint(port: 9001, targetPort: 9001, name: "ws", scheme: "ws");
+
+    builder
         .AddContainer("drizzle-studio", "ghcr.io/drizzle-team/gateway", "1.7.0")
         .WithVolume("pulsas-v1-drizzle-data", "/app")
         .WithEnvironment("STORE_PATH", "/app")

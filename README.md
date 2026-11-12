@@ -2,9 +2,9 @@
 
 Incremental, reviewed migration from the existing `pulsas` application. The initial
 foundation includes Aspire orchestration, PostgreSQL/PostGIS, Drizzle Studio,
-and runnable Worker and GraphQL Gateway hosts. No application schema, domain
-GraphQL API, MQTT connection, background jobs, Web, replay, or data import is
-included yet.
+a local MQTT broker, and runnable Worker and GraphQL Gateway hosts. No application
+schema, domain GraphQL API, Worker MQTT consumer, background jobs, Web, replay,
+or data import is included yet.
 
 ## Prerequisites
 
@@ -99,6 +99,39 @@ curl -H 'Content-Type: application/json' \
   --data '{"query":"{ serviceInfo { name role } }"}' \
   http://localhost:5100/graphql
 ```
+
+## Local MQTT broker
+
+`./aspire.sh` also starts **Eclipse Mosquitto 2.0.22**, available at
+**`ws://localhost:9001/mqtt`** with the WebSocket subprotocol `mqtt`. There is no
+TLS or authentication and no exposed raw MQTT TCP listener. Its configuration is
+mounted read-only from `projects/AppHost/configuration/mosquitto.conf`.
+
+This is a generic local integration-test transport, not a MeshCore broker
+emulator. It does not implement signed-token authentication, topic ownership,
+subscriber roles, payload filtering, topic normalization, or stripping the retain
+flag from `/status` messages. Use the actual MeshCore broker when testing those
+behaviors. Worker does not connect to this broker yet.
+
+The [reference broker](https://github.com/michaelhart/meshcore-mqtt-broker/tree/4c0496b15a0473045d289527f2ffbe39f73271c5)
+uses Aedes 0.51.x, which accepts MQTT 3.1/3.1.1 and supports QoS **0, 1 and 2**.
+Its authorization hooks do not cap QoS; a consumer requesting QoS 1 is a client
+choice, not a broker restriction. Mosquitto is configured with `max_qos 2` and
+default standard QoS delivery (no QoS upgrade). MQTT **3.1.1** is the exercised
+compatibility path; Mosquitto additionally supports MQTT 5, unlike that Aedes
+version. This setup does not artificially reject MQTT 5.
+
+MQTT state is **in memory**: retained messages and persistent client sessions can
+exist during a broker lifetime, but disappear when it restarts. No broker volume
+is created. A publisher's broker ACK is not evidence of Worker ingestion or a
+database commit.
+
+The published endpoint is host-loopback-only. Local processes and potentially
+browser pages can access it without authentication; use synthetic test data only.
+Do not expose it to the LAN/internet, bridge it to a real broker, or send private
+data. The Aspire resource's running state is not an MQTT protocol health check;
+verify readiness with a real MQTT CONNECT/publish/subscribe exchange, not an HTTP
+GET health probe against the WebSocket listener.
 
 ## Formatting and build checks
 
