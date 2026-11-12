@@ -41,7 +41,9 @@ public static class Extensions
             );
 
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+        {
             builder.Services.AddOpenTelemetry().UseOtlpExporter();
+        }
 
         builder
             .Services.AddHealthChecks()

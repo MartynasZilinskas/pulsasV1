@@ -3,8 +3,15 @@
     <Project Path="projects/AppHost/Pulsas.AppHost.csproj" />
     <Project Path="projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
     <Project Path="projects/Gateway.ApiService/Pulsas.Gateway.ApiService.csproj" />
+    <Project Path="projects/TrafficGenerator/Pulsas.TrafficGenerator.csproj" />
   </Folder>
   <Folder Name="/libraries/">
     <Project Path="libraries/Pulsas.ServiceDefaults/Pulsas.ServiceDefaults.csproj" />
+    <Project Path="libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pulsas.MeshCore.Tests/Pulsas.MeshCore.Tests.csproj" />
+    <Project Path="tests/Pulsas.TrafficGenerator.Tests/Pulsas.TrafficGenerator.Tests.csproj" />
+    <Project Path="tests/Pulsas.Worker.Tests/Pulsas.Worker.Tests.csproj" />
   </Folder>
 </Solution>

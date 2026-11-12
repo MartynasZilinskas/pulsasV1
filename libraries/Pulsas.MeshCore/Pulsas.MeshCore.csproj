@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Pulsas.MeshCore</PackageId>
+    <Version>0.1.0</Version>
+    <Description>MeshCore packet framing, ADVERT signatures and group text codecs.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Funcky" />
+    <PackageReference Include="NSec.Cryptography" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

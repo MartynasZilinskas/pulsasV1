@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" />
+    <ProjectReference Include="../../libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
+    <ProjectReference Include="../../libraries/Pulsas.ServiceDefaults/Pulsas.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>
