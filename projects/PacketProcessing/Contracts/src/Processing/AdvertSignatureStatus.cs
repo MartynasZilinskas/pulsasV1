@@ -2,6 +2,7 @@ namespace Pulsas.PacketProcessing.Contracts.Processing;
 
 public enum AdvertSignatureStatus
 {
-    Verified,
-    Invalid,
+    NotChecked = 0,
+    Verified = 1,
+    Invalid = 2,
 }

@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Pulsas.MeshCore.Tests.Payloads.Adverts;
 
@@ -45,13 +47,27 @@ public class AdvertTests
         var parsed = Assert.IsType<AdvertPayload>(
             PacketCodec
                 .Decode(PacketCodec.Encode(packet))
-                .Select(received => AdvertCodec.Decode(received.Payload.AsSpan()))
+                .Select(received =>
+                    AdvertCodec
+                        .Decode(received.Payload.AsSpan())
+                        .Match<object>(left: error => error, right: advert => advert)
+                )
                 .Match<object>(left: error => error, right: received => received)
         );
         Assert.True(AdvertCodec.Verify(parsed));
+        Assert.True(
+            AdvertCodec.ValidateSignature(parsed).Match(left: _ => false, right: _ => true)
+        );
         var tampered = AdvertCodec.Encode(parsed);
         tampered[32] ^= 1;
-        Assert.False(AdvertCodec.Verify(AdvertCodec.Decode(tampered)));
+        Assert.False(
+            AdvertCodec
+                .Decode(tampered)
+                .Match(
+                    left: _ => throw new XunitException("Expected structural decode success."),
+                    right: AdvertCodec.Verify
+                )
+        );
     }
 
     [Fact]
@@ -60,7 +76,7 @@ public class AdvertTests
         using var signer = AdvertSigningKey.Generate();
         var advert = AdvertCodec.CreateSigned(signer, 0, []);
         Assert.True(AdvertCodec.Verify(advert));
-        var json = System.Text.Json.JsonSerializer.Serialize(signer);
+        var json = JsonSerializer.Serialize(signer);
         Assert.Contains("PublicKey", json);
         Assert.DoesNotContain("Private", json);
         Assert.DoesNotContain("Seed", json);
@@ -79,7 +95,99 @@ public class AdvertTests
         using var signer = AdvertSigningKey.Generate();
         var bytes = AdvertCodec.Encode(AdvertCodec.CreateSigned(signer, uint.MaxValue, [2]));
         bytes[offset] ^= 1;
-        Assert.False(AdvertCodec.Verify(AdvertCodec.Decode(bytes)));
+        var decoded = AdvertCodec
+            .Decode(bytes)
+            .Match(
+                left: _ => throw new XunitException("Expected structural decode success."),
+                right: advert => advert
+            );
+        Assert.False(AdvertCodec.Verify(decoded));
+        Assert.Equal(
+            AdvertSignatureErrorKind.SignatureMismatch,
+            AdvertCodec
+                .ValidateSignature(decoded)
+                .Match(
+                    left: error => error.Kind,
+                    right: _ => throw new XunitException("Expected signature failure.")
+                )
+        );
+    }
+
+    [Fact]
+    public void Signature_validation_returns_typed_errors_for_malformed_fields()
+    {
+        using var signer = AdvertSigningKey.Generate();
+        var valid = AdvertCodec.CreateSigned(signer, 0, []);
+        (AdvertPayload Payload, AdvertSignatureError Error)[] cases =
+        [
+            (
+                valid with
+                {
+                    PublicKey = default,
+                },
+                new(AdvertSignatureErrorKind.UninitializedPublicKey)
+            ),
+            (
+                valid with
+                {
+                    PublicKey = [],
+                },
+                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 0)
+            ),
+            (
+                valid with
+                {
+                    PublicKey = [.. new byte[33]],
+                },
+                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 33)
+            ),
+            (
+                valid with
+                {
+                    Signature = default,
+                },
+                new(AdvertSignatureErrorKind.UninitializedSignature)
+            ),
+            (
+                valid with
+                {
+                    Signature = [],
+                },
+                new(AdvertSignatureErrorKind.InvalidSignatureLength, 0)
+            ),
+            (
+                valid with
+                {
+                    Signature = [.. new byte[65]],
+                },
+                new(AdvertSignatureErrorKind.InvalidSignatureLength, 65)
+            ),
+            (valid with { AppData = default }, new(AdvertSignatureErrorKind.UninitializedAppData)),
+            (
+                valid with
+                {
+                    AppData = [.. new byte[33]],
+                },
+                new(AdvertSignatureErrorKind.InvalidAppDataLength, 33)
+            ),
+        ];
+
+        foreach (var (payload, expected) in cases)
+        {
+            var actual = AdvertCodec
+                .ValidateSignature(payload)
+                .Match(
+                    left: error => error,
+                    right: _ => throw new XunitException("Expected validation failure.")
+                );
+            Assert.Equal(expected, actual);
+            Assert.Throws<ArgumentException>(() => AdvertCodec.Verify(payload));
+            Assert.Throws<ArgumentException>(() => AdvertCodec.GetSignedMaterial(payload));
+            Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(payload));
+        }
+
+        Assert.Empty(valid.AppData);
+        Assert.True(AdvertCodec.ValidateSignature(valid).Match(left: _ => false, right: _ => true));
     }
 
     [Fact]
@@ -88,9 +196,59 @@ public class AdvertTests
         using var signer = AdvertSigningKey.Generate();
         Assert.False(AdvertCodec.TryDecode(new byte[99], out _));
         Assert.False(AdvertCodec.TryDecode(new byte[133], out _));
-        Assert.Throws<FormatException>(() => AdvertCodec.Decode([]));
+        Assert.Equal(
+            new AdvertDecodeError(0),
+            AdvertCodec
+                .Decode([])
+                .Match(
+                    left: error => error,
+                    right: _ => throw new XunitException("Expected decode failure.")
+                )
+        );
         Assert.Throws<ArgumentException>(() => AdvertSigningKey.ImportSeed(new byte[31]));
         Assert.Throws<ArgumentException>(() => AdvertCodec.CreateSigned(signer, 0, new byte[33]));
         Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(new([], 0, [], [])));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(99)]
+    [InlineData(133)]
+    public void Decode_returns_length_error_and_try_adapter_returns_null(int length)
+    {
+        Assert.Equal(
+            new AdvertDecodeError(length),
+            AdvertCodec
+                .Decode(new byte[length])
+                .Match(
+                    left: error => error,
+                    right: _ => throw new XunitException("Expected decode failure.")
+                )
+        );
+        Assert.False(AdvertCodec.TryDecode(new byte[length], out var advert));
+        Assert.Null(advert);
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(132)]
+    public void Decode_accepts_boundary_lengths_without_authenticating_signature(int length)
+    {
+        var bytes = Enumerable.Range(0, length).Select(i => (byte)i).ToArray();
+        var decoded = AdvertCodec
+            .Decode(bytes)
+            .Match(
+                left: _ => throw new XunitException("Expected structural decode success."),
+                right: advert => advert
+            );
+        Assert.Equal(bytes, AdvertCodec.Encode(decoded));
+        Assert.True(AdvertCodec.TryDecode(bytes, out var adapted));
+        Assert.Equal(decoded.Timestamp, adapted.Timestamp);
+        Assert.Equal(decoded.PublicKey.ToArray(), adapted.PublicKey.ToArray());
+        Assert.Equal(decoded.Signature.ToArray(), adapted.Signature.ToArray());
+        Assert.Equal(decoded.AppData.ToArray(), adapted.AppData.ToArray());
+        Assert.False(
+            AdvertCodec.ValidateSignature(decoded).Match(left: _ => false, right: _ => true)
+        );
     }
 }

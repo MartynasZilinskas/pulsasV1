@@ -2,11 +2,16 @@
 
 Incremental migration of Pulsas. Includes a MeshCore codec library, local
 infrastructure, Worker/Gateway foundations, and an observer traffic generator.
-Worker interprets packet reports in memory; storage, chat linking, path assessment
-and domain GraphQL queries are not migrated yet.
+Worker interprets packet reports in memory. Persistence models and startup
+configuration are migrated; storage writes, chat linking, path assessment and
+domain GraphQL queries are not wired yet.
 
 The [packet-processing project structure](projects/PacketProcessing/README.md)
 separates Contracts, Core, GraphQL, and Persistence.
+
+Worker supports the previous project's startup secret-file loader and validates
+configured chat channels and routing scopes. See [configuration](configuration/README.md)
+and [persistence](projects/Persistence/README.md) for current integration limits.
 
 ## Run
 

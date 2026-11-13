@@ -10,6 +10,7 @@ public record DummyMqttOptions
         && uri.Scheme is "ws" or "wss"
         && string.IsNullOrEmpty(uri.UserInfo)
         && string.IsNullOrEmpty(uri.Fragment)
-        && Region is { Length: 3 }
-        && Region.All(c => c is >= 'A' and <= 'Z');
+        && !string.IsNullOrWhiteSpace(Region)
+        && Region == Region.Trim()
+        && !Region.Any(c => char.IsControl(c) || c is '/' or '+' or '#');
 }

@@ -12,6 +12,7 @@
     <Project Path="projects/TrafficGenerator/Pulsas.TrafficGenerator.csproj" />
   </Folder>
   <Folder Name="/libraries/">
+    <Project Path="libraries/Pulsas.Configuration/Pulsas.Configuration.csproj" />
     <Project Path="libraries/Pulsas.ServiceDefaults/Pulsas.ServiceDefaults.csproj" />
     <Project Path="libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
   </Folder>

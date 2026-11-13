@@ -1,0 +1,26 @@
+{
+  "chat": {
+    "standard_public": true,
+    "hashtags": [
+      "test",
+      "testing",
+      "bot",
+      "emergency",
+      "iranga",
+      "eu",
+      "baltics",
+      "lietuva",
+      "rytu-lietuva",
+      "pietu-lietuva",
+      "siaures-lietuva",
+      "vakaru-lietuva",
+      "vilnius",
+      "kaunas",
+      "klaipeda",
+      "siauliai",
+      "panevezys",
+      "utena",
+      "hamradio"
+    ]
+  }
+}

@@ -9,7 +9,7 @@ public record ReportTimestamp(
 
 public enum ReportTimestampStatus
 {
-    Missing,
-    Invalid,
-    Parsed,
+    Missing = 0,
+    Invalid = 1,
+    Parsed = 2,
 }

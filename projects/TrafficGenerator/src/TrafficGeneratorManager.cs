@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Formatter;
@@ -132,7 +133,7 @@ public class TrafficGeneratorManager(
     private async Task PublishAsync(CancellationToken cancellationToken)
     {
         var config = options.Value;
-        var observers = System.Collections.Immutable.ImmutableArray<ObserverIdentity>.Empty;
+        var observers = ImmutableArray<ObserverIdentity>.Empty;
         var terminalState = "Completed";
         string? error = null;
         try

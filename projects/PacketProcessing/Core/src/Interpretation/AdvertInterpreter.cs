@@ -16,16 +16,20 @@ internal static class AdvertInterpreter
         {
             return new PayloadInterpretation.Opaque();
         }
-        if (!AdvertCodec.TryDecode(packet.Payload.AsSpan(), out var advert))
-        {
-            return new PayloadInterpretation.MalformedAdvert();
-        }
-        return new PayloadInterpretation.Advert(
-            advert,
-            AdvertCodec.Verify(advert)
-                ? AdvertSignatureStatus.Verified
-                : AdvertSignatureStatus.Invalid,
-            AdvertAppDataCodec.Decode(advert.AppData.AsSpan())
-        );
+        return AdvertCodec
+            .Decode(packet.Payload.AsSpan())
+            .Match<PayloadInterpretation>(
+                left: _ => new PayloadInterpretation.MalformedAdvert(),
+                right: advert => new PayloadInterpretation.Advert(
+                    advert,
+                    AdvertCodec
+                        .ValidateSignature(advert)
+                        .Match(
+                            left: _ => AdvertSignatureStatus.Invalid,
+                            right: _ => AdvertSignatureStatus.Verified
+                        ),
+                    AdvertAppDataCodec.Decode(advert.AppData.AsSpan())
+                )
+            );
     }
 }

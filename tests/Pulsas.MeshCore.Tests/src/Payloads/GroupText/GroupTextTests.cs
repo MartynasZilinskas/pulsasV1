@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Payloads.GroupText;
@@ -65,9 +66,7 @@ public class GroupTextTests
         );
         Assert.Throws<ArgumentException>(() => GroupTextCodec.Encode(new(0, "a\0b"), key));
         Assert.Throws<ArgumentOutOfRangeException>(() => GroupTextCodec.Encode(new(0, "", 4), key));
-        Assert.Throws<System.Text.EncoderFallbackException>(() =>
-            GroupTextCodec.Encode(new(0, "\ud800"), key)
-        );
+        Assert.Throws<EncoderFallbackException>(() => GroupTextCodec.Encode(new(0, "\ud800"), key));
     }
 
     [Fact]

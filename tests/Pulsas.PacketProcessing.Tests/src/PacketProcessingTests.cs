@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using Funcky.Monads;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
@@ -7,6 +9,7 @@ using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.TrafficGenerator;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Pulsas.PacketProcessing.Tests;
 
@@ -49,7 +52,7 @@ public class PacketProcessingTests
                 .Process(Input([]) with { OriginalReport = default })
                 .Match(
                     left: error => error,
-                    right: _ => throw new Xunit.Sdk.XunitException("Expected rejection")
+                    right: _ => throw new XunitException("Expected rejection")
                 )
         );
         Assert.Equal(
@@ -58,7 +61,7 @@ public class PacketProcessingTests
                 .Process(Input([]) with { Context = new("", "KUN", Observer, Arrival) })
                 .Match(
                     left: error => error,
-                    right: _ => throw new Xunit.Sdk.XunitException("Expected rejection")
+                    right: _ => throw new XunitException("Expected rejection")
                 )
         );
     }
@@ -92,10 +95,10 @@ public class PacketProcessingTests
     }
 
     private static IPacketProcessingManager.Result Success(
-        Funcky.Monads.Either<ReportError, IPacketProcessingManager.Result> value
+        Either<ReportError, IPacketProcessingManager.Result> value
     ) =>
         value.Match(
-            left: error => throw new Xunit.Sdk.XunitException($"Unexpected rejection: {error}"),
+            left: error => throw new XunitException($"Unexpected rejection: {error}"),
             right: result => result
         );
 
@@ -107,10 +110,10 @@ public class PacketProcessingTests
         Assert.Equal(
             expected,
             manager
-                .Process(Input(System.Text.Encoding.UTF8.GetBytes(json)))
+                .Process(Input(Encoding.UTF8.GetBytes(json)))
                 .Match(
                     left: error => error,
-                    right: _ => throw new Xunit.Sdk.XunitException("Expected rejection")
+                    right: _ => throw new XunitException("Expected rejection")
                 )
         );
 
@@ -134,7 +137,7 @@ public class PacketProcessingTests
                 .Process(Input(bytes))
                 .Match(
                     left: error => error,
-                    right: _ => throw new Xunit.Sdk.XunitException("Expected rejection")
+                    right: _ => throw new XunitException("Expected rejection")
                 )
         );
     }
@@ -267,7 +270,7 @@ public class PacketProcessingTests
                 .Process(Input(bytes))
                 .Match(
                     left: error => error,
-                    right: _ => throw new Xunit.Sdk.XunitException("Expected rejection")
+                    right: _ => throw new XunitException("Expected rejection")
                 )
         );
     }

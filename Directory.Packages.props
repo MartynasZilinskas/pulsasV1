@@ -4,6 +4,15 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Funcky" Version="3.8.0" />
+    <PackageVersion Include="NodaTime" Version="3.3.7" />
+    <PackageVersion Include="NetTopologySuite" Version="2.6.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" Version="10.0.3" />
+    <PackageVersion
+      Include="Npgsql.EntityFrameworkCore.PostgreSQL.NetTopologySuite"
+      Version="10.0.3"
+    />
     <PackageVersion Include="MQTTnet" Version="5.2.0.1603" />
     <PackageVersion Include="NSec.Cryptography" Version="26.4.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

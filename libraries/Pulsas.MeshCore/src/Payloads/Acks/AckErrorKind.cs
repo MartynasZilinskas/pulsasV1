@@ -2,6 +2,7 @@ namespace Pulsas.MeshCore.Payloads.Acks;
 
 public enum AckErrorKind
 {
-    InvalidChecksumLength,
-    UninitializedChecksum,
+    Unknown = 0,
+    InvalidChecksumLength = 1,
+    UninitializedChecksum = 2,
 }

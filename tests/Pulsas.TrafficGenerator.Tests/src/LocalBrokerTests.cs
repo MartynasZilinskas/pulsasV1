@@ -171,7 +171,11 @@ public class LocalBrokerTests
                         .Match<object>(left: error => error, right: packet => packet)
                 );
                 Assert.Equal(PacketType.Advert, packet.PacketType);
-                var advert = AdvertCodec.Decode(packet.Payload.AsSpan());
+                var advert = Assert.IsType<AdvertPayload>(
+                    AdvertCodec
+                        .Decode(packet.Payload.AsSpan())
+                        .Match<object>(left: error => error, right: value => value)
+                );
                 Assert.True(AdvertCodec.Verify(advert));
                 Assert.NotEqual(observer, Convert.ToHexStringLower(advert.PublicKey.AsSpan()));
                 if (!packets.TryGetValue(raw, out var reporters))

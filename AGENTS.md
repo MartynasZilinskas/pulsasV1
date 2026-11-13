@@ -8,9 +8,12 @@
 
 ## C# conventions
 
-- Default to one type per file, with the filename matching the type name. Tightly
-  owned supporting types may share the file; nested operation contracts are an
-  intentional exception.
+- Prefer `using` directives and short type names over fully qualified type names.
+  Use qualification or aliases only where needed to resolve an actual naming ambiguity.
+- Default to one type per file, with the filename matching the type name. Keep
+  tightly owned entity field-group types in the same file as their entity; they
+  need not be nested CLR types. Other tightly owned supporting types may share
+  the file; nested operation contracts are an intentional exception.
 - Give business-operation classes interfaces and prefer `Manager` over `Service`
   naming. Declare operation input/output records inside the corresponding
   interface (for example, `IUserManager.CreateUserInput` and
@@ -31,3 +34,19 @@
   mutable data. No specific package is required.
 - Persistence models, including EF Core entities, may remain mutable. Apply this
   convention to new or changed code without unrelated broad refactoring.
+
+### Entity field grouping
+
+- Use record types for identity-less entity field groups, including when the
+  containing entity is a class; this does not require converting the entity
+  itself to a record.
+- When adding or refactoring entity fields, group cohesive fields where this
+  improves readability, for example `SignatureVerification` containing `Status`,
+  `FailureReason`, and `CheckedAt`, or `Signal` containing `Rssi` and `Snr`.
+  Avoid arbitrary grouping; consider indexes and relationships, and keep foreign
+  key properties beside their navigation properties.
+- For grouping-only EF Core refactors, map groups with `ComplexProperty` to the
+  existing table and columns. Preserve column types, nullability, defaults,
+  indexes, and constraints; do not introduce a separate table or JSON wrapper.
+- Apply these conventions to relevant new or changed code without unrelated
+  broad refactoring.

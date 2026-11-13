@@ -18,7 +18,11 @@ public class ObserverReportsTests
         var advert = Assert.IsType<AdvertPayload>(
             PacketCodec
                 .Decode(Convert.FromHexString(raw))
-                .Select(packet => AdvertCodec.Decode(packet.Payload.AsSpan()))
+                .Select(packet =>
+                    AdvertCodec
+                        .Decode(packet.Payload.AsSpan())
+                        .Match<object>(left: error => error, right: advert => advert)
+                )
                 .Match<object>(left: error => error, right: advert => advert)
         );
         Assert.True(AdvertCodec.Verify(advert));

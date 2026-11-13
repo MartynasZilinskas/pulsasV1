@@ -20,7 +20,12 @@ public class DummyMqttTests
     [InlineData("ws://user:password@localhost/mqtt", "VNO", false)]
     [InlineData("ws://localhost:9001/mqtt#fragment", "VNO", false)]
     [InlineData("ws://localhost:9001/mqtt", "V/+", false)]
-    [InlineData("ws://localhost:9001/mqtt", "vno", false)]
+    [InlineData("ws://localhost:9001/mqtt", "vno", true)]
+    [InlineData("ws://localhost:9001/mqtt", "east-lithuania", true)]
+    [InlineData("ws://localhost:9001/mqtt", "a#b", false)]
+    [InlineData("ws://localhost:9001/mqtt", " east", false)]
+    [InlineData("ws://localhost:9001/mqtt", "", false)]
+    [InlineData("ws://localhost:9001/mqtt", "a\0b", false)]
     [InlineData("ws://localhost:9001/mqtt", "VNO", true)]
     [InlineData("wss://broker.example/mqtt", "KUN", true)]
     public void Validates_configuration(string endpoint, string region, bool expected) =>
@@ -28,6 +33,17 @@ public class DummyMqttTests
             expected,
             new DummyMqttOptions { Endpoint = endpoint, Region = region }.IsValid()
         );
+
+    [Theory]
+    [InlineData("VNO", true)]
+    [InlineData("east-lithuania", true)]
+    [InlineData("vno", true)]
+    [InlineData("", false)]
+    [InlineData("east/south", false)]
+    [InlineData("east+", false)]
+    [InlineData("east#", false)]
+    public void Generator_uses_generic_topic_safe_regions(string region, bool expected) =>
+        Assert.Equal(expected, new TrafficGeneratorOptions { Region = region }.IsValid());
 
     [WorkerBrokerFact]
     public async Task Subscribes_receives_both_topics_and_disconnects_on_shutdown()
