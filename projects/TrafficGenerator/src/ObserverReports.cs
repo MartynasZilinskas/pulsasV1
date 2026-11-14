@@ -30,8 +30,17 @@ public static class ObserverReports
 
     public static string CreateAdvert(AdvertSigningKey sender, int round, DateTimeOffset at)
     {
+        // Explicit synthetic fixtures inside the four retained Lithuanian regions.
+        // These are demo positions, not region boundaries or production constraints.
+        var (latitude, longitude) = (round % 4) switch
+        {
+            1 => (54_736_798, 23_655_660), // KUN
+            2 => (55_729_519, 21_619_736), // PLQ
+            3 => (55_915_511, 24_325_359), // SQQ
+            _ => (55_035_748, 25_429_177), // VNO
+        };
         var appData = AdvertAppDataCodec
-            .Encode(new(NodeRole.Repeater, Name: $"synthetic-{round}"))
+            .Encode(new(NodeRole.Repeater, latitude, longitude, Name: $"synthetic-{round}"))
             .Match(
                 left: error =>
                     throw new InvalidOperationException(

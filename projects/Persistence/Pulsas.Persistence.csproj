@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <ProjectReference Include="../../libraries/Pulsas.Core/Pulsas.Core.csproj" />
     <PackageReference Include="NodaTime" />
     <PackageReference Include="NetTopologySuite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />

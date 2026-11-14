@@ -31,8 +31,43 @@ mise exec -- dotnet ef migrations has-pending-model-changes --project projects/P
 The design-time factory uses a nonconnecting placeholder. Real migration execution
 uses `ConnectionStrings:pulsas`, injected by Aspire into `DatabaseSetup`; it must
 not be copied into source or logs. Inspect generated migrations before applying.
-`DatabaseSetup` is a schema tool, not an ingestion service. Worker/Gateway still do
-not write application data or reconcile configuration.
+`DatabaseSetup` is a schema tool, not an ingestion service. Development Worker
+projects verified ADVERTs to nodes; Gateway does not yet write application data.
+
+## ADVERT node projection
+
+`IAdvertNodeManager.ProcessAdvertAsync` verifies the actual signed payload at its boundary.
+Invalid signatures never create or update nodes. Verified adverts create missing
+identities by public key; complete valid metadata is applied atomically with an
+EF conditional update timestamp predicate. Missing nodes use ordinary EF insertion;
+a competing public-key insertion returns `ProcessAdvertError.ConcurrentNodeCreation`
+without an internal retry. The contract is `Either<ProcessAdvertError, Unit>`:
+successful writes and no-ops return Right; invalid signatures return Left.
+The delivery layer owns retry/dismissal policy and must preserve original receipt
+time on retries. Current MQTT handling suppresses acknowledgment on a conflict
+but provides no guaranteed redelivery; durable queue ingestion remains pending.
+`AdvertMetadataTimestamp` is nullable
+signed-body Unix seconds, not a reception/hearing time. Only strictly newer claims
+update metadata; equal timestamps keep the first accepted values.
+
+- Omitted name/location preserves stored values; an explicitly empty name is stored.
+- Explicit `(0,0)` clears location and its derived region, matching Beacon. Either
+  coordinate alone may be zero. Latitude/longitude bounds are inclusive ±90°/±180°.
+  `Pulsas.Core` owns coordinate validity through its immutable `GeoLocation` primitive;
+  ADVERT reset policy and conversion to NTS points remain in the persistence writer.
+- Empty, malformed, unsupported, out-of-range, or NUL-containing metadata does not
+  overwrite any metadata or advance its watermark. Verified identity creation is
+  still allowed. The codec remains lossless; PostgreSQL cannot store NUL text.
+- Metadata more than five minutes ahead of trusted Worker receipt time is ignored;
+  the publisher's report timestamp is not used as the clock reference.
+- Existing IDs, creation times and source classifications survive updates. New
+  identities use `ObservedAdvert`. Packet references and radio-hearing timestamps
+  are not invented: packet/content/reception persistence remains unimplemented.
+
+Worker awaits database completion independently of logging. Unexpected failures
+propagate and disable automatic acknowledgment; signature rejections are logged
+and acknowledged as terminal dismissals. This development
+consumer still uses clean MQTT sessions, so this is not a durable retry/queue design.
 
 ## Cached node geography
 

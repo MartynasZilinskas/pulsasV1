@@ -1,20 +1,116 @@
 using System.Collections.Concurrent;
+using System.Reflection;
+using Funcky;
+using Funcky.Monads;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Formatter;
+using MQTTnet.Packets;
 using MQTTnet.Protocol;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.PacketProcessing.Core.Processing;
+using Pulsas.Persistence.Nodes;
 using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService;
 using Xunit;
+using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
 
 namespace Pulsas.Worker.Tests;
 
 public class DummyMqttTests
 {
+    [Theory]
+    [InlineData("success")]
+    [InlineData("failure")]
+    [InlineData("canceled")]
+    [InlineData("conflict")]
+    [InlineData("invalid-signature")]
+    public async Task Callback_awaits_projection_and_only_allows_acknowledgment_on_success(
+        string outcome
+    )
+    {
+        var projection = new TaskCompletionSource<Either<ProcessAdvertError, Unit>>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var nodes = new PendingProjection(projection.Task);
+        using var consumer = new DummyMqttConsumer(
+            Options.Create(new DummyMqttOptions()),
+            new CaptureLogger<DummyMqttConsumer>(),
+            new MqttPacketReportHandler(
+                new PacketProcessingManager(),
+                nodes,
+                new CaptureLogger<MqttPacketReportHandler>()
+            )
+        );
+        using var key = AdvertSigningKey.Generate();
+        var at = DateTimeOffset.UtcNow;
+        var observer = new ObserverIdentity(new string('b', 64), "test");
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic($"meshcore/VNO/{observer.PublicKey}/packets")
+            .WithPayload(
+                ObserverReports.Packet(observer, ObserverReports.CreateAdvert(key, 1, at), at)
+            )
+            .Build();
+        var args = new MqttApplicationMessageReceivedEventArgs(
+            "test",
+            message,
+            new MqttPublishPacket(),
+            (_, _) => Task.CompletedTask
+        );
+        // Invoke the real callback without starting a broker or changing its public API.
+        var callback = typeof(DummyMqttConsumer).GetMethod(
+            "OnMessageReceivedAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic
+        )!;
+        var handling = (Task)callback.Invoke(consumer, [args, CancellationToken.None])!;
+        Assert.False(handling.IsCompleted);
+        if (outcome == "success")
+        {
+            projection.SetResult(Either<ProcessAdvertError, Unit>.Right(default));
+            await handling;
+            Assert.True(args.AutoAcknowledge);
+        }
+        else if (outcome == "failure")
+        {
+            var failure = new InvalidOperationException("projection failed");
+            projection.SetException(failure);
+            Assert.Same(
+                failure,
+                await Assert.ThrowsAsync<InvalidOperationException>(() => handling)
+            );
+            Assert.False(args.AutoAcknowledge);
+        }
+        else if (outcome == "canceled")
+        {
+            projection.SetCanceled();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handling);
+            Assert.False(args.AutoAcknowledge);
+        }
+        else
+        {
+            projection.SetResult(
+                Either<ProcessAdvertError, Unit>.Left(
+                    outcome == "conflict"
+                        ? ProcessAdvertError.ConcurrentNodeCreation
+                        : ProcessAdvertError.InvalidSignature
+                )
+            );
+            await handling;
+            Assert.Equal(outcome != "conflict", args.AutoAcknowledge);
+        }
+    }
+
+    private class PendingProjection(Task<Either<ProcessAdvertError, Unit>> completion)
+        : IAdvertNodeManager
+    {
+        public Task<Either<ProcessAdvertError, Unit>> ProcessAdvertAsync(
+            ProcessAdvertInput input,
+            CancellationToken cancellationToken
+        ) => completion;
+    }
+
     [Theory]
     [InlineData("mqtt://localhost:1883", "VNO", false)]
     [InlineData("ws://user:password@localhost/mqtt", "VNO", false)]
@@ -58,7 +154,11 @@ public class DummyMqttTests
         using var consumer = new DummyMqttConsumer(
             Options.Create(new DummyMqttOptions { Endpoint = endpoint, Region = "TST" }),
             logger,
-            new MqttPacketReportHandler(new PacketProcessingManager(), processingLogger)
+            new MqttPacketReportHandler(
+                new PacketProcessingManager(),
+                new CaptureAdvertNodeManager(),
+                processingLogger
+            )
         );
         var context = new HealthCheckContext();
         Assert.Equal(

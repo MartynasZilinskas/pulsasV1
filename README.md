@@ -5,9 +5,9 @@ infrastructure, Worker/Gateway foundations, and an observer traffic generator.
 Local Aspire runs build a [PostGIS + PGMQ image](projects/AppHost/containers/postgres/README.md);
 deployment will use the provider's image. PGMQ transaction/ordering tests are
 opt-in; the queue is not connected to ingestion yet.
-Worker interprets packet reports in memory. Aspire applies the persistence schema
+Worker interprets packet reports and persists verified ADVERT node metadata. Aspire applies the persistence schema
 through the `database-setup` resource; PostGIS maintains cached node-region
-assignments. Ingestion storage writes, chat linking, path assessment and domain
+assignments. Packet/reception storage, chat linking, path assessment and domain
 GraphQL queries are not wired yet.
 
 The [packet-processing project structure](projects/PacketProcessing/README.md)
@@ -62,6 +62,9 @@ Each run creates fresh synthetic observer and sender identities, publishes onlin
 status, then reports signed ADVERT packets through every observer. It publishes
 offline status on clean completion/stop. No messages are retained. This imitates
 observer reports, not radio propagation or repeater forwarding.
+Synthetic locations cycle through KUN, PLQ, SQQ and VNO. These demo coordinates
+only receive region assignments when the corresponding shapes already exist in
+the database; startup does not import or replace regions.
 
 Defaults: **3 observers, 60 rounds, 1 second between rounds, QoS 1**. A round is
 one signed packet reported by every observer (180 packet reports by default).
@@ -86,15 +89,17 @@ then start traffic. Open **worker → Logs** in the Aspire dashboard:
 ```text
 Dummy MQTT consumer subscribed to meshcore/VNO/+/status and meshcore/VNO/+/packets
 Dummy MQTT received meshcore/VNO/<observer>/packets: ... bytes, QoS AtLeastOnce, retained False
-Packet report interpreted in memory: observer ..., region VNO, packet Decoded, type Advert, payload Advert, advertiser ..., signature Verified, metadata Decoded; not stored
+Packet report interpreted: observer ..., region VNO, packet Decoded, type Advert, payload Advert, advertiser ..., signature Verified, metadata Decoded; packet/reception not stored
 ```
 
 This Development-only consumer logs receipt metadata and interprets packet
 reports: validates observer/topic consistency, decodes packets and verifies ADVERT
 signatures while retaining partial metadata. Status messages remain receipt-only.
 Observer claims are not authenticated. Invalid reports are rejected; malformed
-packets and unknown payloads remain interpretation outcomes. No reports are stored,
-deduplicated, or notified to GraphQL. Logs omit raw report bytes and chat text.
+packets and unknown payloads remain interpretation outcomes. Verified ADVERTs upsert
+nodes by public key with strictly newer signed timestamps; duplicates/equal timestamps
+do not churn metadata. See the persistence README for omission/reset and clock rules.
+Reports/packets/receptions are not stored or notified to GraphQL. Logs omit raw report bytes and chat text.
 It requests QoS 1, retries connection/subscription failures every five seconds,
 and resubscribes after disconnects. Messages sent while disconnected can be lost;
 QoS 1 can deliver duplicates. Worker `/health` is unhealthy until subscribed.
@@ -102,6 +107,8 @@ QoS 1 can deliver duplicates. Worker `/health` is unhealthy until subscribed.
 Aspire supplies `DummyMqtt__Endpoint`. For standalone development it defaults to
 `ws://localhost:9001/mqtt`; `DummyMqtt__Region` defaults to `VNO`. If you change the
 generator region, set the Worker region to match. No consumer runs in Production.
+Standalone Worker also requires `ConnectionStrings:pulsas` for the migrated database;
+Aspire injects it and waits for migrations before starting Worker.
 
 ## MQTT and MeshCore
 

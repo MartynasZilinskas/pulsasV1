@@ -32,7 +32,7 @@ if (builder.ExecutionContext.IsRunMode && builder.Configuration.GetValue<bool>("
             "tests/Pulsas.Worker.Tests",
             "--no-restore",
             "--filter",
-            "FullyQualifiedName~GeographyIntegrationTests"
+            "FullyQualifiedName~GeographyIntegrationTests|FullyQualifiedName~AdvertIntegrationTests"
         )
         .WithEnvironment(
             "PULSAS_GEOGRAPHY_TEST_CONNECTION",
@@ -41,9 +41,10 @@ if (builder.ExecutionContext.IsRunMode && builder.Configuration.GetValue<bool>("
         .WaitForCompletion(databaseSetup);
 }
 
-// No database references until a service actually consumes persistence.
 var worker = builder
     .AddProject<Projects.Pulsas_Worker_ApiService>("worker")
+    .WithReference(database)
+    .WaitForCompletion(databaseSetup)
     .WithHttpHealthCheck("/health");
 builder.AddProject<Projects.Pulsas_Gateway_ApiService>("gateway").WithHttpHealthCheck("/health");
 

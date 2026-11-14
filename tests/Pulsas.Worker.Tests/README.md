@@ -13,8 +13,9 @@ PULSAS_WORKER_MQTT_ENDPOINT=ws://127.0.0.1:9001/mqtt \
 ```
 
 Do not point this at a shared or external broker. This proves transport receipt
-and in-memory ADVERT interpretation, not database persistence. For the generator path, run
-Aspire, wait for Worker health, start traffic, and inspect Worker's interpretation logs.
+and ADVERT interpretation using a test-only projection recorder, not database persistence.
+For the real generator path, run Aspire, wait for Worker health, start traffic,
+and inspect node projection logs and `node_information` in Drizzle.
 
 ## Cached PostGIS geography
 
@@ -33,7 +34,7 @@ With a separately authorized local connection, the equivalent test filter is:
 
 ```sh
 mise exec -- dotnet test tests/Pulsas.Worker.Tests \
-  --filter 'FullyQualifiedName~GeographyIntegrationTests'
+  --filter 'FullyQualifiedName~GeographyIntegrationTests|FullyQualifiedName~AdvertIntegrationTests'
 ```
 
 Set `PULSAS_GEOGRAPHY_TEST_CONNECTION` securely for that invocation; tests skip if
@@ -50,6 +51,13 @@ tampering, unchanged-input caching, repeatable migration application, and concur
 node/region writes and deletions in both lock orders. Lock assertions observe real
 PostgreSQL advisory-lock waits, not timing-only sleeps. Repeatable-read writes are
 explicitly rejected by the current implementation.
+
+The same Aspire resource runs `AdvertIntegrationTests`, exercising the real handler,
+codec, signature verification, atomic node writer and PostGIS assignment. The fixture
+requires the retained KUN/PLQ/SQQ/VNO regions and never imports or replaces them.
+It verifies ordering, concurrent public-key upserts, omissions/reset, malformed metadata,
+coordinate bounds, signature rejection and future-skew policy. Each case removes only
+its own random-key node. Generated demonstration nodes are not removed by this suite.
 
 ## PGMQ transaction and ordering spike
 

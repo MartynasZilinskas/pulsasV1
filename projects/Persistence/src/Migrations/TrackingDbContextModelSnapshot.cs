@@ -276,6 +276,8 @@ namespace Pulsas.Persistence.Migrations
             {
                 b.Property<Guid>("Id").HasColumnType("uuid");
 
+                b.Property<long?>("AdvertMetadataTimestamp").HasColumnType("bigint");
+
                 b.Property<Instant?>("CreatedAt").HasColumnType("timestamp with time zone");
 
                 b.Property<Instant?>("LatestAdvertHeardAt")

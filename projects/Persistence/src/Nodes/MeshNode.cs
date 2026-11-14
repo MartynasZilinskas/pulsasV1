@@ -16,6 +16,9 @@ public class MeshNode
     public Guid? LatestAdvertPacketId { get; set; }
     public MeshPacket? LatestAdvertPacket { get; set; }
     public Instant? LatestAdvertHeardAt { get; set; }
+
+    // Signed Unix seconds of the last accepted metadata, not a radio-hearing time.
+    public long? AdvertMetadataTimestamp { get; set; }
     public Guid? LocationRegionId { get; set; }
     public StoredRegion? LocationRegion { get; set; }
     public ICollection<MeshNodeRegionHearing> HeardInRegions { get; set; } = [];

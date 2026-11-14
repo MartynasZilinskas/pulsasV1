@@ -35,6 +35,24 @@
 - Persistence models, including EF Core entities, may remain mutable. Apply this
   convention to new or changed code without unrelated broad refactoring.
 
+### Operation contracts and composition
+
+- Use Funcky `Option` for optional values and `Either` for expected operation
+  failures. Commands without a required success payload return
+  `Either<OperationSpecificError, Unit>` (inside `Task` when async), rather than
+  success/status enums. Expected rejection or conflict is Left; successful
+  no-op is Right. Return data or entities when callers genuinely need them.
+- Use descriptive operation and contract names, such as `ProcessAdvertAsync`,
+  `ProcessAdvertInput`, and `ProcessAdvertError`. Keep operation contracts in
+  their owning interface; use `using static` for readable short contract names.
+- Compose pure steps with existing Funcky operators; prefer expression bodies
+  where clearer. Keep side effects, resource lifetimes, and cancellation explicit;
+  avoid wrappers added merely for syntax.
+- Managers make one attempt and report known failures. The delivery layer owns
+  bounded retries, dismissal, and logging. Persistence classifies exact provider
+  errors; unexpected exceptions and cancellation propagate.
+- Apply these conventions to new or changed code without broad refactoring.
+
 ### Entity field grouping
 
 - Use record types for identity-less entity field groups, including when the

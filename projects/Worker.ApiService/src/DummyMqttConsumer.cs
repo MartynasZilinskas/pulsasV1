@@ -4,10 +4,11 @@ using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Formatter;
 using MQTTnet.Protocol;
+using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
 
 namespace Pulsas.Worker.ApiService;
 
-// Development-only transport and in-memory interpretation; no persistence.
+// Development-only transport with verified ADVERT node projection.
 public class DummyMqttConsumer(
     IOptions<DummyMqttOptions> options,
     ILogger<DummyMqttConsumer> logger,
@@ -19,7 +20,9 @@ public class DummyMqttConsumer(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
+        Task OnMessage(MqttApplicationMessageReceivedEventArgs args) =>
+            OnMessageReceivedAsync(args, stoppingToken);
+        client.ApplicationMessageReceivedAsync += OnMessage;
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -126,11 +129,14 @@ public class DummyMqttConsumer(
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally
         {
-            client.ApplicationMessageReceivedAsync -= OnMessageReceivedAsync;
+            client.ApplicationMessageReceivedAsync -= OnMessage;
         }
     }
 
-    private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs args)
+    private async Task OnMessageReceivedAsync(
+        MqttApplicationMessageReceivedEventArgs args,
+        CancellationToken cancellationToken
+    )
     {
         var arrivedAt = DateTimeOffset.UtcNow;
         if (logger.IsEnabled(LogLevel.Information))
@@ -145,13 +151,39 @@ public class DummyMqttConsumer(
         }
         if (args.ApplicationMessage.Topic.EndsWith("/packets", StringComparison.Ordinal))
         {
-            packets.Handle(
-                args.ApplicationMessage.Topic,
-                args.ApplicationMessage.Payload.ToArray(),
-                arrivedAt
-            );
+            try
+            {
+                var processed = await packets.HandleAsync(
+                    args.ApplicationMessage.Topic,
+                    args.ApplicationMessage.Payload.ToArray(),
+                    arrivedAt,
+                    cancellationToken
+                );
+                processed.Switch(
+                    left: error =>
+                    {
+                        if (error == ProcessAdvertError.ConcurrentNodeCreation)
+                        {
+                            args.AutoAcknowledge = false;
+                            logger.LogWarning(
+                                "ADVERT processing conflicted: {Reason}; delivery not acknowledged. This consumer has no guaranteed redelivery.",
+                                error
+                            );
+                        }
+                        else
+                        {
+                            logger.LogWarning("ADVERT dismissed: {Reason}", error);
+                        }
+                    },
+                    right: _ => { }
+                );
+            }
+            catch
+            {
+                args.AutoAcknowledge = false;
+                throw;
+            }
         }
-        return Task.CompletedTask;
     }
 
     public Task<HealthCheckResult> CheckHealthAsync(
@@ -161,7 +193,7 @@ public class DummyMqttConsumer(
         Task.FromResult(
             subscribed && client.IsConnected
                 ? HealthCheckResult.Healthy(
-                    "MQTT subscriptions are active; packet reports are interpreted in memory only."
+                    "MQTT subscriptions are active; verified ADVERTs project node metadata."
                 )
                 : HealthCheckResult.Unhealthy("Dummy MQTT consumer is not subscribed.")
         );
