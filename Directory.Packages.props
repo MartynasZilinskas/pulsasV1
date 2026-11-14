@@ -5,6 +5,7 @@
   <ItemGroup>
     <PackageVersion Include="Funcky" Version="3.8.0" />
     <PackageVersion Include="NodaTime" Version="3.3.7" />
+    <PackageVersion Include="Npgmq" Version="1.13.0" />
     <PackageVersion Include="NetTopologySuite" Version="2.6.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />

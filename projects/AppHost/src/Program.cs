@@ -6,6 +6,10 @@ var postgres = builder
     .WithImage("postgis/postgis")
     .WithImageTag("18-3.6")
     .WithDataVolume("pulsas-v1-postgres-data");
+if (builder.ExecutionContext.IsRunMode)
+{
+    postgres.WithDockerfile("containers/postgres", "Containerfile");
+}
 var database = postgres.AddDatabase("pulsas", "pulsas_dev");
 
 // No database references until a service actually consumes persistence.

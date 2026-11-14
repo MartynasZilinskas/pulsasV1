@@ -1,0 +1,11 @@
+FROM docker.io/postgis/postgis:18-3.6
+
+# Local development only. Deployment uses the provider's PostgreSQL image.
+ADD https://codeload.github.com/pgmq/pgmq/tar.gz/refs/tags/v1.13.1 /usr/local/src/pgmq.tar.gz
+RUN echo '67221f288f42f95c002a64df40f7d660e765e32df8ada0f2672ba915a14827f7  /usr/local/src/pgmq.tar.gz' | sha256sum -c - \
+    && tar -xzf /usr/local/src/pgmq.tar.gz -C /usr/local/src \
+    && extension_dir="$(pg_config --sharedir)/extension" \
+    && cp /usr/local/src/pgmq-1.13.1/pgmq-extension/pgmq.control "$extension_dir/" \
+    && cp /usr/local/src/pgmq-1.13.1/pgmq-extension/sql/pgmq.sql "$extension_dir/pgmq--1.13.1.sql" \
+    && cp /usr/local/src/pgmq-1.13.1/pgmq-extension/sql/pgmq--*--*.sql "$extension_dir/" \
+    && rm -rf /usr/local/src/pgmq.tar.gz /usr/local/src/pgmq-1.13.1

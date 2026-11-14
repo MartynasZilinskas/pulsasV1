@@ -2,6 +2,9 @@
 
 Incremental migration of Pulsas. Includes a MeshCore codec library, local
 infrastructure, Worker/Gateway foundations, and an observer traffic generator.
+Local Aspire runs build a [PostGIS + PGMQ image](projects/AppHost/containers/postgres/README.md);
+deployment will use the provider's image. PGMQ transaction/ordering tests are
+opt-in; the queue is not connected to ingestion yet.
 Worker interprets packet reports in memory. Persistence models and startup
 configuration are migrated; storage writes, chat linking, path assessment and
 domain GraphQL queries are not wired yet.
