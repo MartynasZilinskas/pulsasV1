@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Pulsas.Persistence.Analytics;
 using Pulsas.Persistence.Brokers;
 using Pulsas.Persistence.Nodes;
@@ -302,11 +303,15 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
         node.HasOne(x => x.LocationRegion)
             .WithMany()
             .HasForeignKey(x => x.LocationRegionId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.NoAction);
         node.Property(x => x.Location).HasColumnType("geometry(Point,4326)");
         node.Property(x => x.Role).HasConversion<short>().HasColumnType("smallint");
         node.Property(x => x.SourceType).HasColumnType("mesh_node_source_type");
-        node.Property(x => x.LocationRegionId).HasColumnName("LocationRegionId");
+        var locationRegion = node.Property(x => x.LocationRegionId)
+            .HasColumnName("LocationRegionId")
+            .ValueGeneratedOnAddOrUpdate();
+        locationRegion.Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        locationRegion.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
         node.HasOne(x => x.LatestAdvertPacket)
             .WithMany()
             .HasForeignKey(x => x.LatestAdvertPacketId)
@@ -476,6 +481,7 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
         region.Property(x => x.ModifiedAt).HasColumnType("timestamp with time zone");
         region.HasAlternateKey(x => x.Code).HasName("ux_regions_code");
         region.Property(x => x.Shape).HasColumnType("geometry(MultiPolygon,4326)");
+        region.HasIndex(x => x.Shape).HasMethod("gist").HasDatabaseName("ix_regions_shape_gist");
 
         var quarterly = model.Entity<StoredReceptionTypeCount>();
         quarterly.ToTable("reception_type_counts", table =>

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 // Aspire generates the password once and retains it in local user secrets.
@@ -11,6 +13,33 @@ if (builder.ExecutionContext.IsRunMode)
     postgres.WithDockerfile("containers/postgres", "Containerfile");
 }
 var database = postgres.AddDatabase("pulsas", "pulsas_dev");
+var databaseSetup = builder
+    .AddProject<Projects.Pulsas_DatabaseSetup>("database-setup")
+    .WithReference(database)
+    .WaitFor(database);
+
+if (builder.ExecutionContext.IsRunMode && builder.Configuration.GetValue<bool>("GeographyTests"))
+{
+    builder
+        .AddExecutable(
+            "geography-tests",
+            "mise",
+            "../..",
+            "exec",
+            "--",
+            "dotnet",
+            "test",
+            "tests/Pulsas.Worker.Tests",
+            "--no-restore",
+            "--filter",
+            "FullyQualifiedName~GeographyIntegrationTests"
+        )
+        .WithEnvironment(
+            "PULSAS_GEOGRAPHY_TEST_CONNECTION",
+            database.Resource.ConnectionStringExpression
+        )
+        .WaitForCompletion(databaseSetup);
+}
 
 // No database references until a service actually consumes persistence.
 var worker = builder
@@ -54,7 +83,7 @@ if (builder.ExecutionContext.IsRunMode)
         .WithEnvironment("DATABASE_URL_pulsas", database.Resource.UriExpression)
         .WithHttpEndpoint(port: 4983, targetPort: 4983)
         .WithHttpHealthCheck("/health")
-        .WaitFor(database);
+        .WaitForCompletion(databaseSetup);
 }
 
 await builder.Build().RunAsync();

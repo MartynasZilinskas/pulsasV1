@@ -6,11 +6,12 @@ PGMQ is SQL/PLpgSQL, so no compiler or extra service is needed. Extension upgrad
 scripts are included. A cold build requires access to the base-image registry
 and GitHub. The base image tag follows the existing local PostgreSQL setup.
 
-The image supplies extension files; it does **not** enable PGMQ in an existing
-database, initialize the application schema, or modify stored data. The existing
-`pulsas-v1-postgres-data` volume is retained. No startup SQL or automatic
-extension upgrades are added. Restarting the development stack to use the image
-is a separate operational step; do not remove volumes to switch images.
+The image supplies extension files; it does **not** itself enable PGMQ or initialize
+the application schema. Aspire's separate `database-setup` resource now applies EF
+migrations (including PostGIS and node geography triggers) to `pulsas_dev`. It does
+not enable PGMQ. The existing `pulsas-v1-postgres-data` volume is retained. No image
+startup SQL or automatic extension upgrades are added. Do not remove volumes to
+switch images.
 
 Deployment uses the provider's image, not this Containerfile. Provisioning must
 supply PostGIS and a compatible PGMQ version. Npgmq's grouped-head API requires

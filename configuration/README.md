@@ -64,4 +64,6 @@ This is startup validation only. Border paths are retained as supplied, not open
 or imported; use absolute paths for future import. Channel reconciliation,
 decryption/retries, scope reassessment, geography persistence and operational
 retention policies are not wired. Persisted region constraints still require the
-separately approved model change; no migrations or database changes are included.
+separately approved model change for operator-defined IDs. Aspire now applies the
+persistence schema and cached node-geography triggers, but does not import this
+configuration into that database; see [persistence](../projects/Persistence/README.md).

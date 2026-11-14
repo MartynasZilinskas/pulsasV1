@@ -16,6 +16,41 @@ Do not point this at a shared or external broker. This proves transport receipt
 and in-memory ADVERT interpretation, not database persistence. For the generator path, run
 Aspire, wait for Worker health, start traffic, and inspect Worker's interpretation logs.
 
+## Cached PostGIS geography
+
+Run the opt-in suite through Aspire so it receives the existing database connection
+without extracting passwords. From the repository root, start Aspire with:
+
+```sh
+./aspire.sh run -- --GeographyTests=true
+```
+
+The `geography-tests` resource waits for migrations, runs against **the same
+retained `pulsas_dev` database**, and exits. Inspect it in the dashboard or use
+`./aspire.sh logs geography-tests`; rerun with
+`./aspire.sh resource geography-tests restart`. Normal startup omits this resource.
+With a separately authorized local connection, the equivalent test filter is:
+
+```sh
+mise exec -- dotnet test tests/Pulsas.Worker.Tests \
+  --filter 'FullyQualifiedName~GeographyIntegrationTests'
+```
+
+Set `PULSAS_GEOGRAPHY_TEST_CONNECTION` securely for that invocation; tests skip if
+it is missing. Never point the suite at a remote/shared database. Tests use reserved
+synthetic region codes `ZQA`, `ZQB`, `ZQC`, `ZQR` around coordinates 0–5 degrees.
+Most roll back; concurrency cases commit UUID-tagged rows and remove only those
+rows afterward. Two rollback-only cases temporarily instrument a database function
+or procedure to prove unchanged inputs skip recomputation. They restore definitions
+on transaction rollback. No databases, schemas, volumes, or existing rows are reset.
+
+Coverage includes EF hydration, interior/outside/null positions, shared boundaries,
+shape/code edits, direct/bulk deletion, protected historical references, assignment
+tampering, unchanged-input caching, repeatable migration application, and concurrent
+node/region writes and deletions in both lock orders. Lock assertions observe real
+PostgreSQL advisory-lock waits, not timing-only sleeps. Repeatable-read writes are
+explicitly rejected by the current implementation.
+
 ## PGMQ transaction and ordering spike
 
 Npgmq **1.13.0** is currently a test-only dependency. These opt-in tests use the

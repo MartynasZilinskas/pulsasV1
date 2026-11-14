@@ -1,6 +1,17 @@
 /.tmp/
 /.serena/
 /.aspire/
+/.repowise/
+# Machine-local Repowise editor integrations (OpenCode is configured separately).
+/.mcp.json
+/.claude/
+/.codex/
+/.cursor/
+/.kiro/
+/.vscode/mcp.json
+/.vscode/extensions.json
+/.github/copilot-instructions.md
+/CLAUDE.md
 **/bin/
 **/obj/
 **/TestResults/

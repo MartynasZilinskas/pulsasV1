@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/projects/">
     <Project Path="projects/Persistence/Pulsas.Persistence.csproj" />
+    <Project Path="projects/DatabaseSetup/Pulsas.DatabaseSetup.csproj" />
     <Project Path="projects/AppHost/Pulsas.AppHost.csproj" />
     <Project Path="projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
     <Project Path="projects/Gateway.ApiService/Pulsas.Gateway.ApiService.csproj" />
