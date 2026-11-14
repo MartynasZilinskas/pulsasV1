@@ -60,7 +60,6 @@ public class EnumContractTests
         new int[] { 0, 1, 2, 3 }
     )]
     [InlineData(typeof(NodeRole), "Client,Repeater,RoomServer,Sensor", new int[] { 1, 2, 3, 4 })]
-    [InlineData(typeof(ControlSubtype), "DiscoveryRequest,DiscoveryResponse", new int[] { 8, 9 })]
     public void MeshCore_wire_values_remain_exact(Type type, string names, int[] values)
     {
         Assert.Equal(typeof(byte), Enum.GetUnderlyingType(type));

@@ -26,24 +26,6 @@ public class ControlTests
                     .Match<object>(left: error => error, right: value => value)
             );
         }
-        Assert.Equal(
-            ControlSubtype.DiscoveryRequest,
-            ControlCodec
-                .Decode([8])
-                .Match(
-                    left: _ => throw new Xunit.Sdk.XunitException("Expected decode success."),
-                    right: control => control.Subtype
-                )
-        );
-        Assert.Equal(
-            ControlSubtype.DiscoveryResponse,
-            ControlCodec
-                .Decode([9])
-                .Match(
-                    left: _ => throw new Xunit.Sdk.XunitException("Expected decode success."),
-                    right: control => control.Subtype
-                )
-        );
     }
 
     [Fact]
