@@ -31,11 +31,13 @@ Console.WriteLine(outcome);
 
 - `PacketCodec` handles packet encoding/decoding and preserves payload bytes without
   interpreting them. Payload codecs accept payload bytes, not full packets.
-  Packet decoding returns `Either<PacketDecodeError, MeshCorePacket>`; ACK
-  decoding/encoding return `Either<AckError, ...>`. Both retain `TryDecode` adapters.
-  Other structural decoders use `TryDecode`/throwing `Decode`; app-data and
-  group-text decoding return explicit outcomes. Invalid construction outside the
-  ACK pilot and native crypto failures can still throw.
+  Packet, ADVERT, ACK, control, multipart, and group-text decoding return typed
+  Funcky `Either` results. App-data decoding returns
+  `Either<AdvertAppDataDecodeError, Option<AdvertAppData>>`: empty bytes are a
+  successful `None`, and failures can carry partial fixed-field claims.
+  Existing `TryDecode` APIs remain compatibility adapters. ACK encoding also
+  returns `Either`; other invalid construction and native crypto failures can
+  still throw.
 - Packet limits: 255-byte packet, 64-byte path, 184-byte payload, at most 63 path
   entries. Decode preserves future versions and reserved width-four paths; inspect
   support flags before interpretation. TRACE path bytes are not ordinary hops.

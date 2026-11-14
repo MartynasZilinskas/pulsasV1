@@ -1,3 +1,4 @@
+using Funcky.Monads;
 using Pulsas.MeshCore.Payloads.Adverts;
 
 namespace Pulsas.PacketProcessing.Contracts.Processing;
@@ -14,6 +15,6 @@ public abstract record PayloadInterpretation
     public record Advert(
         AdvertPayload Payload,
         AdvertSignatureStatus Signature,
-        AdvertAppDataDecodeResult AppData
+        Either<AdvertAppDataDecodeError, Option<AdvertAppData>> AppData
     ) : PayloadInterpretation;
 }

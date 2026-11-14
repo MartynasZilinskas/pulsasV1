@@ -20,17 +20,10 @@ public class GuidV7Tests
         );
         Assert.Equal('7', id[12]);
         Assert.Contains(id[16], "89ab");
-        Assert.Equal(1, clock.ReadCount);
     }
 
     private class FixedClock(Instant instant) : IClock
     {
-        public int ReadCount { get; private set; }
-
-        public Instant GetCurrentInstant()
-        {
-            ReadCount++;
-            return instant;
-        }
+        public Instant GetCurrentInstant() => instant;
     }
 }

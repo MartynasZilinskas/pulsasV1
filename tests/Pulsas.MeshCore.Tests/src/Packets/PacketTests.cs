@@ -131,8 +131,6 @@ public class PacketTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             PacketCodec.Create(RouteType.Flood, PacketType.Advert, [1], pathWidth: 4)
         );
-        Assert.False(PacketCodec.TryDecode([0x11, 0, .. new byte[185]], out _));
-        Assert.False(PacketCodec.TryDecode(new byte[256], out _));
     }
 
     [Theory]

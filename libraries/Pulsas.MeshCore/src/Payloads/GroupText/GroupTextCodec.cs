@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using Funcky.Monads;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Packets;
 
@@ -45,7 +46,10 @@ public static class GroupTextCodec
         }
     }
 
-    public static GroupTextDecodeResult Decode(ReadOnlySpan<byte> payload, GroupChannelKey key)
+    public static Either<GroupTextDecodeError, GroupTextMessage> Decode(
+        ReadOnlySpan<byte> payload,
+        GroupChannelKey key
+    )
     {
         key.ThrowIfDisposed();
         if (
@@ -53,19 +57,25 @@ public static class GroupTextCodec
             || (payload.Length - 3) % 16 != 0
         )
         {
-            return new(GroupTextDecodeStatus.Malformed);
+            return Either<GroupTextDecodeError, GroupTextMessage>.Left(
+                new(GroupTextDecodeErrorKind.Malformed)
+            );
         }
 
         if (payload[0] != key.ChannelHash)
         {
-            return new(GroupTextDecodeStatus.ChannelMismatch);
+            return Either<GroupTextDecodeError, GroupTextMessage>.Left(
+                new(GroupTextDecodeErrorKind.ChannelMismatch)
+            );
         }
 
         var ciphertext = payload[3..];
         var mac = key.Mac(ciphertext);
         if (!CryptographicOperations.FixedTimeEquals(mac.AsSpan(0, 2), payload.Slice(1, 2)))
         {
-            return new(GroupTextDecodeStatus.MacMismatch);
+            return Either<GroupTextDecodeError, GroupTextMessage>.Left(
+                new(GroupTextDecodeErrorKind.MacMismatch)
+            );
         }
 
         var plaintext = key.Transform(ciphertext, encrypt: false);
@@ -73,7 +83,9 @@ public static class GroupTextCodec
         {
             if ((plaintext[4] >> 2) != 0)
             {
-                return new(GroupTextDecodeStatus.UnsupportedTextType);
+                return Either<GroupTextDecodeError, GroupTextMessage>.Left(
+                    new(GroupTextDecodeErrorKind.UnsupportedTextType)
+                );
             }
 
             var end = Array.IndexOf(plaintext, (byte)0, 5);
@@ -89,11 +101,14 @@ public static class GroupTextCodec
             }
             catch (DecoderFallbackException)
             {
-                return new(GroupTextDecodeStatus.Malformed);
+                return Either<GroupTextDecodeError, GroupTextMessage>.Left(
+                    new(GroupTextDecodeErrorKind.Malformed)
+                );
             }
-            return new(
-                GroupTextDecodeStatus.Success,
-                new(BinaryPrimitives.ReadUInt32LittleEndian(plaintext), text, plaintext[4])
+            return new GroupTextMessage(
+                BinaryPrimitives.ReadUInt32LittleEndian(plaintext),
+                text,
+                plaintext[4]
             );
         }
         finally

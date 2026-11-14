@@ -38,8 +38,7 @@ public class GroupTextTests
         var message = new GroupTextMessage(1_700_000_000, text, attempt);
         Assert.Equal(hex, Convert.ToHexStringLower(GroupTextCodec.Encode(message, key)));
         var decoded = GroupTextCodec.Decode(Convert.FromHexString(hex), key);
-        Assert.Equal(GroupTextDecodeStatus.Success, decoded.Status);
-        Assert.Equal(message, decoded.Message);
+        Assert.Equal(message, decoded.Match<object>(left: error => error, right: value => value));
     }
 
     [Fact]
@@ -53,7 +52,9 @@ public class GroupTextTests
                 var message = new GroupTextMessage(uint.MaxValue, text, attempt);
                 Assert.Equal(
                     message,
-                    GroupTextCodec.Decode(GroupTextCodec.Encode(message, key), key).Message
+                    GroupTextCodec
+                        .Decode(GroupTextCodec.Encode(message, key), key)
+                        .Match<object>(left: error => error, right: value => value)
                 );
             }
         }
@@ -78,28 +79,48 @@ public class GroupTextTests
         var otherChannel = payload.ToArray();
         otherChannel[0] ^= 1;
         Assert.Equal(
-            GroupTextDecodeStatus.ChannelMismatch,
-            GroupTextCodec.Decode(otherChannel, key).Status
+            new GroupTextDecodeError(GroupTextDecodeErrorKind.ChannelMismatch),
+            GroupTextCodec
+                .Decode(otherChannel, key)
+                .Match<object>(left: error => error, right: value => value)
         );
-        payload[1] ^= 1;
-        Assert.Equal(GroupTextDecodeStatus.MacMismatch, GroupTextCodec.Decode(payload, key).Status);
-        payload[^1] ^= 1;
-        Assert.Equal(GroupTextDecodeStatus.MacMismatch, GroupTextCodec.Decode(payload, key).Status);
+        var changedMac = payload.ToArray();
+        changedMac[1] ^= 1;
+        Assert.Equal(
+            new GroupTextDecodeError(GroupTextDecodeErrorKind.MacMismatch),
+            GroupTextCodec
+                .Decode(changedMac, key)
+                .Match<object>(left: error => error, right: value => value)
+        );
+        var changedCiphertext = payload.ToArray();
+        changedCiphertext[^1] ^= 1;
+        Assert.Equal(
+            new GroupTextDecodeError(GroupTextDecodeErrorKind.MacMismatch),
+            GroupTextCodec
+                .Decode(changedCiphertext, key)
+                .Match<object>(left: error => error, right: value => value)
+        );
         foreach (var length in new[] { 0, 3, 4, 18, 20, 195 })
         {
             Assert.Equal(
-                GroupTextDecodeStatus.Malformed,
-                GroupTextCodec.Decode(new byte[length], key).Status
+                new GroupTextDecodeError(GroupTextDecodeErrorKind.Malformed),
+                GroupTextCodec
+                    .Decode(new byte[length], key)
+                    .Match<object>(left: error => error, right: value => value)
             );
         }
 
         Assert.Equal(
-            GroupTextDecodeStatus.UnsupportedTextType,
-            GroupTextCodec.Decode(InvalidTextPayload(secret, 4, 0xff), key).Status
+            new GroupTextDecodeError(GroupTextDecodeErrorKind.UnsupportedTextType),
+            GroupTextCodec
+                .Decode(InvalidTextPayload(secret, 4, 0xff), key)
+                .Match<object>(left: error => error, right: value => value)
         );
         Assert.Equal(
-            GroupTextDecodeStatus.Malformed,
-            GroupTextCodec.Decode(InvalidTextPayload(secret, 0, 0xff), key).Status
+            new GroupTextDecodeError(GroupTextDecodeErrorKind.Malformed),
+            GroupTextCodec
+                .Decode(InvalidTextPayload(secret, 0, 0xff), key)
+                .Match<object>(left: error => error, right: value => value)
         );
     }
 

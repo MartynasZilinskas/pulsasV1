@@ -13,37 +13,66 @@ public class ControlTests
         for (var code = 0; code <= byte.MaxValue; code++)
         {
             byte[] bytes = [(byte)code, .. new byte[bodyLength]];
-            var control = ControlCodec.Decode(bytes);
+            var control = Assert.IsType<ControlPayload>(
+                ControlCodec
+                    .Decode(bytes)
+                    .Match<object>(left: error => error, right: value => value)
+            );
             Assert.Equal((byte)code, control.SubtypeCode);
             Assert.Equal(bytes, ControlCodec.Encode(control));
         }
-        Assert.Equal(ControlSubtype.DiscoveryRequest, ControlCodec.Decode([8]).Subtype);
-        Assert.Equal(ControlSubtype.DiscoveryResponse, ControlCodec.Decode([9]).Subtype);
+        Assert.Equal(
+            ControlSubtype.DiscoveryRequest,
+            ControlCodec
+                .Decode([8])
+                .Match(
+                    left: _ => throw new Xunit.Sdk.XunitException("Expected decode success."),
+                    right: control => control.Subtype
+                )
+        );
+        Assert.Equal(
+            ControlSubtype.DiscoveryResponse,
+            ControlCodec
+                .Decode([9])
+                .Match(
+                    left: _ => throw new Xunit.Sdk.XunitException("Expected decode success."),
+                    right: control => control.Subtype
+                )
+        );
     }
 
     [Fact]
     public void Body_is_copied_without_claiming_discovery_body_validation()
     {
         byte[] bytes = [8, 0, 0x12, 0, 0x12];
-        var control = ControlCodec.Decode(bytes);
+        Assert.True(ControlCodec.TryDecode(bytes, out var control));
         bytes[1] = 99;
         Assert.Equal(new byte[] { 8, 0, 0x12, 0, 0x12 }, ControlCodec.Encode(control));
     }
 
     [Fact]
-    public void Rejects_invalid_structure_and_construction()
+    public void Rejects_invalid_construction()
     {
-        foreach (var bytes in new[] { Array.Empty<byte>(), new byte[185] })
-        {
-            Assert.False(ControlCodec.TryDecode(bytes, out var result));
-            Assert.Null(result);
-            Assert.Throws<FormatException>(() => ControlCodec.Decode(bytes));
-        }
         Assert.Throws<ArgumentException>(() =>
             ControlCodec.Encode(new(ControlSubtype.DiscoveryRequest, default))
         );
         Assert.Throws<ArgumentException>(() =>
             ControlCodec.Encode(new(ControlSubtype.DiscoveryRequest, [.. new byte[184]]))
         );
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(185)]
+    [InlineData(256)]
+    public void Decode_returns_typed_length_error_and_try_adapter_returns_null(int length)
+    {
+        var bytes = new byte[length];
+        var error = Assert.IsType<ControlDecodeError>(
+            ControlCodec.Decode(bytes).Match<object>(left: value => value, right: value => value)
+        );
+        Assert.Equal(new ControlDecodeError(length), error);
+        Assert.False(ControlCodec.TryDecode(bytes, out var result));
+        Assert.Null(result);
     }
 }

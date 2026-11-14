@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Funcky.Monads;
 using Pulsas.MeshCore.Cryptography;
+using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Pulsas.PacketProcessing.Contracts.Processing;
@@ -33,7 +34,13 @@ public class PacketProcessingTests
         Assert.Equal(Observer, result.Report.Observer);
         Assert.NotEqual(Observer, Convert.ToHexStringLower(advert.Payload.PublicKey.AsSpan()));
         Assert.Equal(AdvertSignatureStatus.Verified, advert.Signature);
-        Assert.Equal("synthetic-1", advert.AppData.Data?.Name);
+        Assert.Equal(
+            "synthetic-1",
+            advert.AppData.Match<object?>(
+                left: error => error,
+                right: data => data.Match<string?>(none: () => null, some: claims => claims.Name)
+            )
+        );
         Assert.Equal(reportedAt, result.Report.Timestamp.Value);
         Assert.Equal(Arrival, result.Input.Context.ArrivedAt);
         Assert.Equal(raw, result.Report.RawHex);
@@ -188,24 +195,56 @@ public class PacketProcessingTests
         var packet = Assert.IsType<PacketOutcome.Decoded>(Process(Convert.ToHexString(raw)).Packet);
         var advert = Assert.IsType<PayloadInterpretation.Advert>(packet.Interpretation);
         Assert.Equal(AdvertSignatureStatus.Invalid, advert.Signature);
-        Assert.Equal("synthetic-1", advert.AppData.Data?.Name);
+        Assert.Equal(
+            "synthetic-1",
+            advert.AppData.Match<object?>(
+                left: error => error,
+                right: data => data.Match<string?>(none: () => null, some: claims => claims.Name)
+            )
+        );
         Assert.Equal(raw, packet.Raw.ToArray());
     }
 
-    [Fact]
-    public void Partial_app_data_keeps_fixed_claims_and_signature()
+    [Theory]
+    [InlineData("82ff", AdvertAppDataDecodeErrorKind.Malformed, true)]
+    [InlineData("02ff", AdvertAppDataDecodeErrorKind.Unsupported, true)]
+    [InlineData("12", AdvertAppDataDecodeErrorKind.Malformed, false)]
+    public void App_data_failure_keeps_partial_claims_signature_and_original_bytes(
+        string hex,
+        AdvertAppDataDecodeErrorKind kind,
+        bool hasPartialData
+    )
     {
         using var sender = AdvertSigningKey.Generate();
-        var advert = AdvertCodec.CreateSigned(sender, 1, [0x82, 0xff]);
+        var advert = AdvertCodec.CreateSigned(sender, 1, Convert.FromHexString(hex));
         var raw = PacketCodec.Encode(
             PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
         );
         var packet = Assert.IsType<PacketOutcome.Decoded>(Process(Convert.ToHexString(raw)).Packet);
         var interpretation = Assert.IsType<PayloadInterpretation.Advert>(packet.Interpretation);
         Assert.Equal(AdvertSignatureStatus.Verified, interpretation.Signature);
-        Assert.Equal(AdvertAppDataDecodeStatus.Malformed, interpretation.AppData.Status);
-        Assert.Equal((byte)2, interpretation.AppData.Data?.RoleCode);
-        Assert.Null(interpretation.AppData.Data?.Name);
+        Assert.Equal(
+            new AdvertAppDataDecodeError(kind, hasPartialData ? new(NodeRole.Repeater) : null),
+            interpretation.AppData.Match<object>(left: error => error, right: data => data)
+        );
+        Assert.Equal(raw, packet.Raw.ToArray());
+    }
+
+    [Fact]
+    public void Empty_app_data_remains_successful_absence_with_verified_signature()
+    {
+        using var sender = AdvertSigningKey.Generate();
+        var advert = AdvertCodec.CreateSigned(sender, 1, []);
+        var raw = PacketCodec.Encode(
+            PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
+        );
+        var packet = Assert.IsType<PacketOutcome.Decoded>(Process(Convert.ToHexString(raw)).Packet);
+        var interpretation = Assert.IsType<PayloadInterpretation.Advert>(packet.Interpretation);
+        Assert.Equal(AdvertSignatureStatus.Verified, interpretation.Signature);
+        Assert.Equal(
+            Option<AdvertAppData>.None,
+            interpretation.AppData.Match<object>(left: error => error, right: data => data)
+        );
     }
 
     [Fact]

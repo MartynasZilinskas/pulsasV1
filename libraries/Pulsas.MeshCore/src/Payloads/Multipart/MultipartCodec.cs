@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Funcky.Monads;
 using Pulsas.MeshCore.Packets;
 
 namespace Pulsas.MeshCore.Payloads.Multipart;
@@ -10,20 +11,24 @@ public static class MultipartCodec
         [NotNullWhen(true)] out MultipartPayload? multipart
     )
     {
-        multipart = null;
-        if (payload.Length is < 1 or > PacketCodec.MaximumPayloadLength)
-        {
-            return false;
-        }
-
-        multipart = new((byte)(payload[0] >> 4), (PacketType)(payload[0] & 15), [.. payload[1..]]);
-        return true;
+        multipart = Decode(payload)
+            .Match<MultipartPayload?>(left: _ => null, right: value => value);
+        return multipart is not null;
     }
 
-    public static MultipartPayload Decode(ReadOnlySpan<byte> payload) =>
-        TryDecode(payload, out var multipart)
-            ? multipart
-            : throw new FormatException("Malformed multipart wrapper.");
+    public static Either<MultipartDecodeError, MultipartPayload> Decode(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length is < 1 or > PacketCodec.MaximumPayloadLength)
+        {
+            return Either<MultipartDecodeError, MultipartPayload>.Left(new(payload.Length));
+        }
+
+        return new MultipartPayload(
+            (byte)(payload[0] >> 4),
+            (PacketType)(payload[0] & 15),
+            [.. payload[1..]]
+        );
+    }
 
     public static byte[] Encode(MultipartPayload multipart)
     {

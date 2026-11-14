@@ -46,7 +46,12 @@ public class PacketConfigurationTests
         using var key = snapshot.Channels[0].CreateKey();
         var payload = GroupTextCodec.Encode(new(1, "test", 0), key);
         using var second = snapshot.Channels[1].CreateKey();
-        Assert.Equal(GroupTextDecodeStatus.Success, GroupTextCodec.Decode(payload, second).Status);
+        Assert.Equal(
+            new GroupTextMessage(1, "test"),
+            GroupTextCodec
+                .Decode(payload, second)
+                .Match<object>(left: error => error, right: value => value)
+        );
         var serialized = JsonSerializer.Serialize(snapshot);
         Assert.DoesNotContain("AAAAAAAAAAAAAAAAAAAAAA==", serialized);
         Assert.DoesNotContain("\"Key\"", serialized);
@@ -111,8 +116,10 @@ public class PacketConfigurationTests
                 .Build();
         using var key = Assert.Single(ChatConfiguration.Read(configuration)).CreateKey();
         Assert.Equal(
-            GroupTextDecodeStatus.Success,
-            GroupTextCodec.Decode(GroupTextCodec.Encode(new(1, "test", 0), key), key).Status
+            new GroupTextMessage(1, "test"),
+            GroupTextCodec
+                .Decode(GroupTextCodec.Encode(new(1, "test", 0), key), key)
+                .Match<object>(left: error => error, right: value => value)
         );
     }
 

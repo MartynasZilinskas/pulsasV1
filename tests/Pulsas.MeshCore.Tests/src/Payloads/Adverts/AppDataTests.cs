@@ -1,3 +1,4 @@
+using Funcky.Monads;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Xunit;
@@ -7,38 +8,80 @@ namespace Pulsas.MeshCore.Tests.Payloads.Adverts;
 public class AppDataTests
 {
     [Theory]
-    [InlineData("", AdvertAppDataDecodeStatus.Empty)]
-    [InlineData("12", AdvertAppDataDecodeStatus.Malformed)]
-    [InlineData("02aa", AdvertAppDataDecodeStatus.Unsupported)]
-    [InlineData("a23412ff", AdvertAppDataDecodeStatus.Malformed)]
-    [InlineData("02", AdvertAppDataDecodeStatus.Decoded)]
-    public void Detailed_outcomes_preserve_only_complete_claims(
+    [InlineData("12", AdvertAppDataDecodeErrorKind.Malformed, false, null)]
+    [InlineData("02aa", AdvertAppDataDecodeErrorKind.Unsupported, true, null)]
+    [InlineData("a23412ff", AdvertAppDataDecodeErrorKind.Malformed, true, 0x1234)]
+    [InlineData("7234127856aa", AdvertAppDataDecodeErrorKind.Malformed, false, null)]
+    [InlineData(
+        "000000000000000000000000000000000000000000000000000000000000000000",
+        AdvertAppDataDecodeErrorKind.Malformed,
+        false,
+        null
+    )]
+    public void Failures_preserve_only_complete_fixed_claims(
         string hex,
-        AdvertAppDataDecodeStatus status
+        AdvertAppDataDecodeErrorKind kind,
+        bool hasPartialData,
+        int? feature1
     )
     {
         var bytes = Convert.FromHexString(hex);
-        var result = AdvertAppDataCodec.Decode(bytes);
-        Assert.Equal(status, result.Status);
-        if (hex is "" or "12")
-        {
-            Assert.Null(result.Data);
-        }
-        else
-        {
-            Assert.Equal(NodeRole.Repeater, result.Data!.Role);
-        }
+        var error = Assert.IsType<AdvertAppDataDecodeError>(
+            AdvertAppDataCodec
+                .Decode(bytes)
+                .Match<object>(left: value => value, right: value => value)
+        );
+        var partial = hasPartialData
+            ? new AdvertAppData(NodeRole.Repeater, Feature1: (ushort?)feature1)
+            : null;
+        Assert.Equal(new AdvertAppDataDecodeError(kind, partial), error);
+        Assert.False(AdvertAppDataCodec.TryDecode(bytes, out var data));
+        Assert.Null(data);
+    }
 
-        if (hex == "a23412ff")
-        {
-            Assert.Equal((ushort)0x1234, result.Data!.Feature1);
-            Assert.Null(result.Data.Name);
-        }
-        if (status is AdvertAppDataDecodeStatus.Malformed or AdvertAppDataDecodeStatus.Unsupported)
-        {
-            Assert.False(AdvertAppDataCodec.TryDecode(bytes, out var data));
-            Assert.Null(data);
-        }
+    [Theory]
+    [InlineData("f2ffffffff0000000034127856ff", AdvertAppDataDecodeErrorKind.Malformed)]
+    [InlineData("72ffffffff0000000034127856aa", AdvertAppDataDecodeErrorKind.Unsupported)]
+    public void Name_and_trailing_data_failures_preserve_coordinates_and_both_features(
+        string hex,
+        AdvertAppDataDecodeErrorKind kind
+    )
+    {
+        var expected = new AdvertAppDataDecodeError(
+            kind,
+            new(NodeRole.Repeater, -1, 0, 0x1234, 0x5678)
+        );
+        Assert.Equal(
+            expected,
+            AdvertAppDataCodec
+                .Decode(Convert.FromHexString(hex))
+                .Match<object>(left: error => error, right: data => data)
+        );
+    }
+
+    [Theory]
+    [InlineData("", false, null)]
+    [InlineData("02", true, null)]
+    [InlineData("82", true, "")]
+    public void Empty_bytes_absent_name_and_empty_name_remain_distinct(
+        string hex,
+        bool hasClaims,
+        string? name
+    )
+    {
+        var bytes = Convert.FromHexString(hex);
+        var expected = hasClaims
+            ? Option.Some(new AdvertAppData(NodeRole.Repeater, Name: name))
+            : Option<AdvertAppData>.None;
+        Assert.Equal(
+            expected,
+            AdvertAppDataCodec
+                .Decode(bytes)
+                .Match<object>(left: error => error, right: value => value)
+        );
+        Assert.True(AdvertAppDataCodec.TryDecode(bytes, out var adapted));
+        Assert.Equal(hasClaims ? new AdvertAppData(NodeRole.Repeater, Name: name) : null, adapted);
+        Assert.Equal(bytes, AdvertAppDataCodec.Encode(adapted));
     }
 
     [Fact]
@@ -46,9 +89,17 @@ public class AppDataTests
     {
         for (byte role = 0; role < 16; role++)
         {
-            var result = AdvertAppDataCodec.Decode([role]);
-            Assert.Equal(role, result.Data!.RoleCode);
-            Assert.Equal(new[] { role }, AdvertAppDataCodec.Encode(result.Data));
+            var data = Assert.IsType<AdvertAppData>(
+                AdvertAppDataCodec
+                    .Decode([role])
+                    .Match<object?>(
+                        left: error => error,
+                        right: value =>
+                            value.Match<AdvertAppData?>(none: () => null, some: claims => claims)
+                    )
+            );
+            Assert.Equal(role, data.RoleCode);
+            Assert.Equal(new[] { role }, AdvertAppDataCodec.Encode(data));
         }
     }
 
@@ -60,31 +111,23 @@ public class AppDataTests
         Assert.Equal("f2ffffffff00000000341278565231", Convert.ToHexStringLower(bytes));
         Assert.True(AdvertAppDataCodec.TryDecode(bytes, out var decoded));
         Assert.Equal(input, decoded);
-        Assert.True(AdvertAppDataCodec.TryDecode([], out var empty));
-        Assert.Null(empty);
-        Assert.Empty(AdvertAppDataCodec.Encode(null));
     }
 
     [Fact]
     public void Preserves_unknown_role_and_geographically_invalid_claims()
     {
         var input = new AdvertAppData((NodeRole)15, int.MaxValue, int.MinValue, Name: "Ž");
-        Assert.True(AdvertAppDataCodec.TryDecode(AdvertAppDataCodec.Encode(input), out var result));
-        Assert.Equal(input, result);
+        Assert.Equal(
+            Option.Some(input),
+            AdvertAppDataCodec
+                .Decode(AdvertAppDataCodec.Encode(input))
+                .Match<object>(left: error => error, right: value => value)
+        );
     }
 
     [Fact]
-    public void Distinguishes_absent_and_empty_name_and_rejects_malformed_structure()
+    public void Rejects_invalid_construction()
     {
-        Assert.Equal(new byte[] { 2 }, AdvertAppDataCodec.Encode(new(NodeRole.Repeater)));
-        Assert.Equal(
-            new byte[] { 0x82 },
-            AdvertAppDataCodec.Encode(new(NodeRole.Repeater, Name: ""))
-        );
-        Assert.False(AdvertAppDataCodec.TryDecode([0x12], out _));
-        Assert.False(AdvertAppDataCodec.TryDecode([0x82, 0xff], out _));
-        Assert.False(AdvertAppDataCodec.TryDecode([2, 0], out _));
-        Assert.False(AdvertAppDataCodec.TryDecode(new byte[33], out _));
         Assert.Throws<ArgumentException>(() => AdvertAppDataCodec.Encode(new((NodeRole)16)));
         Assert.Throws<ArgumentException>(() =>
             AdvertAppDataCodec.Encode(new(NodeRole.Repeater, LatitudeMicrodegrees: 0))

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using Funcky.Monads;
 using Pulsas.MeshCore.Nodes;
 
 namespace Pulsas.MeshCore.Payloads.Adverts;
@@ -11,23 +12,33 @@ public static class AdvertAppDataCodec
     // Empty app data has no role or claims and is represented by null.
     public static bool TryDecode(ReadOnlySpan<byte> bytes, out AdvertAppData? data)
     {
-        var result = Decode(bytes);
-        var success =
-            result.Status is AdvertAppDataDecodeStatus.Decoded or AdvertAppDataDecodeStatus.Empty;
-        data = success ? result.Data : null;
-        return success;
+        var result = Decode(bytes)
+            .Match(
+                left: _ => (Success: false, Data: (AdvertAppData?)null),
+                right: value =>
+                    (
+                        Success: true,
+                        Data: value.Match<AdvertAppData?>(none: () => null, some: claims => claims)
+                    )
+            );
+        data = result.Data;
+        return result.Success;
     }
 
-    public static AdvertAppDataDecodeResult Decode(ReadOnlySpan<byte> bytes)
+    public static Either<AdvertAppDataDecodeError, Option<AdvertAppData>> Decode(
+        ReadOnlySpan<byte> bytes
+    )
     {
         if (bytes.Length > AdvertCodec.MaximumAppDataLength)
         {
-            return new(AdvertAppDataDecodeStatus.Malformed);
+            return Either<AdvertAppDataDecodeError, Option<AdvertAppData>>.Left(
+                new(AdvertAppDataDecodeErrorKind.Malformed)
+            );
         }
 
         if (bytes.IsEmpty)
         {
-            return new(AdvertAppDataDecodeStatus.Empty);
+            return Option<AdvertAppData>.None;
         }
 
         var flags = bytes[0];
@@ -38,7 +49,9 @@ public static class AdvertAppDataCodec
             + ((flags & 0x40) != 0 ? 2 : 0);
         if (bytes.Length < required)
         {
-            return new(AdvertAppDataDecodeStatus.Malformed);
+            return Either<AdvertAppDataDecodeError, Option<AdvertAppData>>.Left(
+                new(AdvertAppDataDecodeErrorKind.Malformed)
+            );
         }
 
         int? latitude = null,
@@ -77,15 +90,19 @@ public static class AdvertAppDataCodec
             }
             catch (DecoderFallbackException)
             {
-                return new(AdvertAppDataDecodeStatus.Malformed, data);
+                return Either<AdvertAppDataDecodeError, Option<AdvertAppData>>.Left(
+                    new(AdvertAppDataDecodeErrorKind.Malformed, data)
+                );
             }
         }
         else if (offset != bytes.Length)
         {
-            return new(AdvertAppDataDecodeStatus.Unsupported, data);
+            return Either<AdvertAppDataDecodeError, Option<AdvertAppData>>.Left(
+                new(AdvertAppDataDecodeErrorKind.Unsupported, data)
+            );
         }
 
-        return new(AdvertAppDataDecodeStatus.Decoded, data);
+        return Option.Some(data);
     }
 
     public static byte[] Encode(AdvertAppData? data)

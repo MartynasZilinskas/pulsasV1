@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Funcky.Monads;
 using Pulsas.MeshCore.Packets;
 
 namespace Pulsas.MeshCore.Payloads.Control;
@@ -10,20 +11,19 @@ public static class ControlCodec
         [NotNullWhen(true)] out ControlPayload? control
     )
     {
-        control = null;
-        if (payload.Length is < 1 or > PacketCodec.MaximumPayloadLength)
-        {
-            return false;
-        }
-
-        control = new((ControlSubtype)payload[0], [.. payload[1..]]);
-        return true;
+        control = Decode(payload).Match<ControlPayload?>(left: _ => null, right: value => value);
+        return control is not null;
     }
 
-    public static ControlPayload Decode(ReadOnlySpan<byte> payload) =>
-        TryDecode(payload, out var control)
-            ? control
-            : throw new FormatException("Malformed control wrapper.");
+    public static Either<ControlDecodeError, ControlPayload> Decode(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length is < 1 or > PacketCodec.MaximumPayloadLength)
+        {
+            return Either<ControlDecodeError, ControlPayload>.Left(new(payload.Length));
+        }
+
+        return new ControlPayload((ControlSubtype)payload[0], [.. payload[1..]]);
+    }
 
     public static byte[] Encode(ControlPayload control)
     {

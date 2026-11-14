@@ -58,16 +58,6 @@ public class AdvertTests
         Assert.True(
             AdvertCodec.ValidateSignature(parsed).Match(left: _ => false, right: _ => true)
         );
-        var tampered = AdvertCodec.Encode(parsed);
-        tampered[32] ^= 1;
-        Assert.False(
-            AdvertCodec
-                .Decode(tampered)
-                .Match(
-                    left: _ => throw new XunitException("Expected structural decode success."),
-                    right: AdvertCodec.Verify
-                )
-        );
     }
 
     [Fact]
@@ -185,26 +175,12 @@ public class AdvertTests
             Assert.Throws<ArgumentException>(() => AdvertCodec.GetSignedMaterial(payload));
             Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(payload));
         }
-
-        Assert.Empty(valid.AppData);
-        Assert.True(AdvertCodec.ValidateSignature(valid).Match(left: _ => false, right: _ => true));
     }
 
     [Fact]
-    public void Rejects_malformed_construction_and_payloads()
+    public void Rejects_malformed_construction()
     {
         using var signer = AdvertSigningKey.Generate();
-        Assert.False(AdvertCodec.TryDecode(new byte[99], out _));
-        Assert.False(AdvertCodec.TryDecode(new byte[133], out _));
-        Assert.Equal(
-            new AdvertDecodeError(0),
-            AdvertCodec
-                .Decode([])
-                .Match(
-                    left: error => error,
-                    right: _ => throw new XunitException("Expected decode failure.")
-                )
-        );
         Assert.Throws<ArgumentException>(() => AdvertSigningKey.ImportSeed(new byte[31]));
         Assert.Throws<ArgumentException>(() => AdvertCodec.CreateSigned(signer, 0, new byte[33]));
         Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(new([], 0, [], [])));

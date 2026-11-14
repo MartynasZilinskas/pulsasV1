@@ -52,7 +52,10 @@ public class MqttPacketReportHandler(
             decoded?.Interpretation.GetType().Name,
             advert is null ? null : Convert.ToHexStringLower(advert.Payload.PublicKey.AsSpan()),
             advert?.Signature,
-            advert?.AppData.Status
+            advert?.AppData.Match(
+                left: error => error.Kind.ToString(),
+                right: data => data.Match(none: () => "Empty", some: _ => "Decoded")
+            )
         );
     }
 }

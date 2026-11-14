@@ -1,6 +1,8 @@
 using Funcky.Monads;
 using Microsoft.Extensions.Logging;
 using Pulsas.MeshCore.Cryptography;
+using Pulsas.MeshCore.Packets;
+using Pulsas.MeshCore.Payloads.Adverts;
 using Pulsas.PacketProcessing.Contracts.Processing;
 using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.PacketProcessing.Core.Processing;
@@ -56,6 +58,32 @@ public class MqttPacketReportHandlerTests
 
         Assert.Equal(1, processing.Calls);
         Assert.Empty(logger.Messages);
+    }
+
+    [Theory]
+    [InlineData("", "Empty")]
+    [InlineData("82", "Decoded")]
+    [InlineData("82ff", "Malformed")]
+    [InlineData("02ff", "Unsupported")]
+    public void Logs_app_data_outcome_without_losing_verified_advert(string hex, string outcome)
+    {
+        var logger = new CaptureLogger();
+        var handler = new MqttPacketReportHandler(new PacketProcessingManager(), logger);
+        var at = DateTimeOffset.UtcNow;
+        var observer = new ObserverIdentity(new string('b', 64), "observer");
+        using var sender = AdvertSigningKey.Generate();
+        var advert = AdvertCodec.CreateSigned(sender, 1, Convert.FromHexString(hex));
+        var raw = PacketCodec.Encode(
+            PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
+        );
+        handler.Handle(
+            $"meshcore/KUN/{observer.PublicKey}/packets",
+            ObserverReports.Packet(observer, Convert.ToHexString(raw), at),
+            at
+        );
+        var message = Assert.Single(logger.Messages);
+        Assert.Contains("signature Verified", message);
+        Assert.Contains($"metadata {outcome}; not stored", message);
     }
 
     private class CountingProcessor : IPacketProcessingManager
