@@ -19,7 +19,12 @@ public class ControlTests
                     .Match<object>(left: error => error, right: value => value)
             );
             Assert.Equal((byte)code, control.SubtypeCode);
-            Assert.Equal(bytes, ControlCodec.Encode(control));
+            Assert.Equal(
+                bytes,
+                ControlCodec
+                    .Encode(control)
+                    .Match<object>(left: error => error, right: value => value)
+            );
         }
         Assert.Equal(
             ControlSubtype.DiscoveryRequest,
@@ -47,17 +52,33 @@ public class ControlTests
         byte[] bytes = [8, 0, 0x12, 0, 0x12];
         Assert.True(ControlCodec.TryDecode(bytes, out var control));
         bytes[1] = 99;
-        Assert.Equal(new byte[] { 8, 0, 0x12, 0, 0x12 }, ControlCodec.Encode(control));
+        Assert.Equal(
+            new byte[] { 8, 0, 0x12, 0, 0x12 },
+            ControlCodec.Encode(control).Match<object>(left: error => error, right: value => value)
+        );
     }
 
     [Fact]
-    public void Rejects_invalid_construction()
+    public void Encode_rejects_uninitialized_body()
     {
-        Assert.Throws<ArgumentException>(() =>
-            ControlCodec.Encode(new(ControlSubtype.DiscoveryRequest, default))
+        Assert.Equal(
+            new ControlEncodeError(ControlEncodeErrorKind.UninitializedBody),
+            ControlCodec
+                .Encode(new(ControlSubtype.DiscoveryRequest, default))
+                .Match<object>(left: error => error, right: value => value)
         );
-        Assert.Throws<ArgumentException>(() =>
-            ControlCodec.Encode(new(ControlSubtype.DiscoveryRequest, [.. new byte[184]]))
+    }
+
+    [Theory]
+    [InlineData(184)]
+    [InlineData(256)]
+    public void Encode_returns_rejected_body_length(int length)
+    {
+        Assert.Equal(
+            new ControlEncodeError(ControlEncodeErrorKind.InvalidBodyLength, length),
+            ControlCodec
+                .Encode(new(ControlSubtype.DiscoveryRequest, [.. new byte[length]]))
+                .Match<object>(left: error => error, right: value => value)
         );
     }
 

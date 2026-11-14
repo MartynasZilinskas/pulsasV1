@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Funcky;
 using Funcky.Monads;
@@ -36,10 +37,37 @@ public static class AdvertCodec
         );
     }
 
-    public static byte[] Encode(AdvertPayload advert)
+    public static Either<AdvertEncodeError, byte[]> Encode(AdvertPayload advert)
     {
-        var signed = GetSignedMaterial(advert);
-        return [.. signed.AsSpan(0, 36), .. advert.Signature, .. advert.AppData];
+        if (ValidateFields(advert) is { } error)
+        {
+            var kind = error.Kind switch
+            {
+                AdvertSignatureErrorKind.UninitializedPublicKey =>
+                    AdvertEncodeErrorKind.UninitializedPublicKey,
+                AdvertSignatureErrorKind.InvalidPublicKeyLength =>
+                    AdvertEncodeErrorKind.InvalidPublicKeyLength,
+                AdvertSignatureErrorKind.UninitializedSignature =>
+                    AdvertEncodeErrorKind.UninitializedSignature,
+                AdvertSignatureErrorKind.InvalidSignatureLength =>
+                    AdvertEncodeErrorKind.InvalidSignatureLength,
+                AdvertSignatureErrorKind.UninitializedAppData =>
+                    AdvertEncodeErrorKind.UninitializedAppData,
+                AdvertSignatureErrorKind.InvalidAppDataLength =>
+                    AdvertEncodeErrorKind.InvalidAppDataLength,
+                _ => throw new UnreachableException(
+                    "Field validation returned a nonstructural signature error."
+                ),
+            };
+            return Either<AdvertEncodeError, byte[]>.Left(new(kind, error.Length));
+        }
+
+        var signed = CreateSignedMaterial(advert);
+        return Either<AdvertEncodeError, byte[]>.Right([
+            .. signed.AsSpan(0, 36),
+            .. advert.Signature,
+            .. advert.AppData,
+        ]);
     }
 
     public static byte[] GetSignedMaterial(AdvertPayload advert)

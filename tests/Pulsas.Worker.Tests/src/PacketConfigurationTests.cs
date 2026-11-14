@@ -44,7 +44,11 @@ public class PacketConfigurationTests
         var snapshot = PacketConfiguration.Read(configuration);
         Assert.Equal(new[] { "one", "two" }, snapshot.Channels.Select(c => c.ConfigurationId));
         using var key = snapshot.Channels[0].CreateKey();
-        var payload = GroupTextCodec.Encode(new(1, "test", 0), key);
+        var payload = Assert.IsType<byte[]>(
+            GroupTextCodec
+                .Encode(new(1, "test", 0), key)
+                .Match<object>(left: error => error, right: value => value)
+        );
         using var second = snapshot.Channels[1].CreateKey();
         Assert.Equal(
             new GroupTextMessage(1, "test"),
@@ -115,10 +119,15 @@ public class PacketConfigurationTests
                 )
                 .Build();
         using var key = Assert.Single(ChatConfiguration.Read(configuration)).CreateKey();
+        var payload = Assert.IsType<byte[]>(
+            GroupTextCodec
+                .Encode(new(1, "test", 0), key)
+                .Match<object>(left: error => error, right: value => value)
+        );
         Assert.Equal(
             new GroupTextMessage(1, "test"),
             GroupTextCodec
-                .Decode(GroupTextCodec.Encode(new(1, "test", 0), key), key)
+                .Decode(payload, key)
                 .Match<object>(left: error => error, right: value => value)
         );
     }

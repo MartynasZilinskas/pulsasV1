@@ -11,23 +11,42 @@ public static class GroupTextCodec
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
-    public static byte[] Encode(GroupTextMessage message, GroupChannelKey key)
+    public static Either<GroupTextEncodeError, byte[]> Encode(
+        GroupTextMessage message,
+        GroupChannelKey key
+    )
     {
         key.ThrowIfDisposed();
         if (message.Attempt > 3)
         {
-            throw new ArgumentOutOfRangeException(nameof(message));
+            return Either<GroupTextEncodeError, byte[]>.Left(
+                new(GroupTextEncodeErrorKind.InvalidAttempt)
+            );
         }
 
         if (message.Text.Contains('\0'))
         {
-            throw new ArgumentException("Group text cannot contain NUL.", nameof(message));
+            return Either<GroupTextEncodeError, byte[]>.Left(
+                new(GroupTextEncodeErrorKind.EmbeddedNul)
+            );
         }
 
-        var textLength = Utf8.GetByteCount(message.Text);
+        int textLength;
+        try
+        {
+            textLength = Utf8.GetByteCount(message.Text);
+        }
+        catch (EncoderFallbackException)
+        {
+            return Either<GroupTextEncodeError, byte[]>.Left(
+                new(GroupTextEncodeErrorKind.InvalidText)
+            );
+        }
         if (textLength > 171)
         {
-            throw new ArgumentException("Group text exceeds the payload limit.", nameof(message));
+            return Either<GroupTextEncodeError, byte[]>.Left(
+                new(GroupTextEncodeErrorKind.InvalidTextLength, textLength)
+            );
         }
 
         var plaintext = new byte[(5 + textLength + 15) / 16 * 16];
@@ -38,7 +57,12 @@ public static class GroupTextCodec
             Utf8.GetBytes(message.Text, plaintext.AsSpan(5));
             var ciphertext = key.Transform(plaintext, encrypt: true);
             var mac = key.Mac(ciphertext);
-            return [key.ChannelHash, mac[0], mac[1], .. ciphertext];
+            return Either<GroupTextEncodeError, byte[]>.Right([
+                key.ChannelHash,
+                mac[0],
+                mac[1],
+                .. ciphertext,
+            ]);
         }
         finally
         {

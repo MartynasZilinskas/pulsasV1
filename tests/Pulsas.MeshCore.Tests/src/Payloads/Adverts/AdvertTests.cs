@@ -39,11 +39,17 @@ public class AdvertTests
             Convert.ToHexStringLower(advert.PublicKey.AsSpan())
         );
         Assert.Equal(expectedSignature, Convert.ToHexStringLower(advert.Signature.AsSpan()));
-        var packet = PacketCodec.Create(
-            RouteType.Flood,
-            PacketType.Advert,
-            AdvertCodec.Encode(advert)
-        );
+        byte[] expectedSigned = [.. advert.PublicKey, 1, 2, 3, 4, .. app];
+        Assert.Equal(expectedSigned, AdvertCodec.GetSignedMaterial(advert));
+        var encoded = EncodeSuccess(advert);
+        byte[] expectedPayload =
+        [
+            .. expectedSigned.AsSpan(0, 36),
+            .. Convert.FromHexString(expectedSignature),
+            .. app,
+        ];
+        Assert.Equal(expectedPayload, encoded);
+        var packet = PacketCodec.Create(RouteType.Flood, PacketType.Advert, encoded);
         var parsed = Assert.IsType<AdvertPayload>(
             PacketCodec
                 .Decode(PacketCodec.Encode(packet))
@@ -72,6 +78,7 @@ public class AdvertTests
         Assert.DoesNotContain("Seed", json);
         signer.Dispose();
         Assert.Throws<ObjectDisposedException>(() => signer.Sign([1]));
+        Assert.Throws<ObjectDisposedException>(() => AdvertCodec.CreateSigned(signer, 0, []));
         signer.Dispose();
     }
 
@@ -83,7 +90,7 @@ public class AdvertTests
     public void Mutations_are_not_authenticated(int offset)
     {
         using var signer = AdvertSigningKey.Generate();
-        var bytes = AdvertCodec.Encode(AdvertCodec.CreateSigned(signer, uint.MaxValue, [2]));
+        var bytes = EncodeSuccess(AdvertCodec.CreateSigned(signer, uint.MaxValue, [2]));
         bytes[offset] ^= 1;
         var decoded = AdvertCodec
             .Decode(bytes)
@@ -104,65 +111,83 @@ public class AdvertTests
     }
 
     [Fact]
-    public void Signature_validation_returns_typed_errors_for_malformed_fields()
+    public void Encoding_and_signature_validation_return_typed_errors_for_malformed_fields()
     {
         using var signer = AdvertSigningKey.Generate();
         var valid = AdvertCodec.CreateSigned(signer, 0, []);
-        (AdvertPayload Payload, AdvertSignatureError Error)[] cases =
+        (
+            AdvertPayload Payload,
+            AdvertSignatureError Error,
+            AdvertEncodeErrorKind EncodeKind
+        )[] cases =
         [
             (
                 valid with
                 {
                     PublicKey = default,
                 },
-                new(AdvertSignatureErrorKind.UninitializedPublicKey)
+                new(AdvertSignatureErrorKind.UninitializedPublicKey),
+                AdvertEncodeErrorKind.UninitializedPublicKey
             ),
             (
                 valid with
                 {
                     PublicKey = [],
                 },
-                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 0)
+                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 0),
+                AdvertEncodeErrorKind.InvalidPublicKeyLength
             ),
             (
                 valid with
                 {
                     PublicKey = [.. new byte[33]],
                 },
-                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 33)
+                new(AdvertSignatureErrorKind.InvalidPublicKeyLength, 33),
+                AdvertEncodeErrorKind.InvalidPublicKeyLength
             ),
             (
                 valid with
                 {
                     Signature = default,
                 },
-                new(AdvertSignatureErrorKind.UninitializedSignature)
+                new(AdvertSignatureErrorKind.UninitializedSignature),
+                AdvertEncodeErrorKind.UninitializedSignature
             ),
             (
                 valid with
                 {
                     Signature = [],
                 },
-                new(AdvertSignatureErrorKind.InvalidSignatureLength, 0)
+                new(AdvertSignatureErrorKind.InvalidSignatureLength, 0),
+                AdvertEncodeErrorKind.InvalidSignatureLength
             ),
             (
                 valid with
                 {
                     Signature = [.. new byte[65]],
                 },
-                new(AdvertSignatureErrorKind.InvalidSignatureLength, 65)
+                new(AdvertSignatureErrorKind.InvalidSignatureLength, 65),
+                AdvertEncodeErrorKind.InvalidSignatureLength
             ),
-            (valid with { AppData = default }, new(AdvertSignatureErrorKind.UninitializedAppData)),
+            (
+                valid with
+                {
+                    AppData = default,
+                },
+                new(AdvertSignatureErrorKind.UninitializedAppData),
+                AdvertEncodeErrorKind.UninitializedAppData
+            ),
             (
                 valid with
                 {
                     AppData = [.. new byte[33]],
                 },
-                new(AdvertSignatureErrorKind.InvalidAppDataLength, 33)
+                new(AdvertSignatureErrorKind.InvalidAppDataLength, 33),
+                AdvertEncodeErrorKind.InvalidAppDataLength
             ),
         ];
 
-        foreach (var (payload, expected) in cases)
+        foreach (var (payload, expected, encodeKind) in cases)
         {
             var actual = AdvertCodec
                 .ValidateSignature(payload)
@@ -173,7 +198,12 @@ public class AdvertTests
             Assert.Equal(expected, actual);
             Assert.Throws<ArgumentException>(() => AdvertCodec.Verify(payload));
             Assert.Throws<ArgumentException>(() => AdvertCodec.GetSignedMaterial(payload));
-            Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(payload));
+            Assert.Equal(
+                new AdvertEncodeError(encodeKind, expected.Length),
+                AdvertCodec
+                    .Encode(payload)
+                    .Match<object>(left: error => error, right: bytes => bytes)
+            );
         }
     }
 
@@ -183,7 +213,6 @@ public class AdvertTests
         using var signer = AdvertSigningKey.Generate();
         Assert.Throws<ArgumentException>(() => AdvertSigningKey.ImportSeed(new byte[31]));
         Assert.Throws<ArgumentException>(() => AdvertCodec.CreateSigned(signer, 0, new byte[33]));
-        Assert.Throws<ArgumentException>(() => AdvertCodec.Encode(new([], 0, [], [])));
     }
 
     [Theory]
@@ -217,7 +246,7 @@ public class AdvertTests
                 left: _ => throw new XunitException("Expected structural decode success."),
                 right: advert => advert
             );
-        Assert.Equal(bytes, AdvertCodec.Encode(decoded));
+        Assert.Equal(bytes, EncodeSuccess(decoded));
         Assert.True(AdvertCodec.TryDecode(bytes, out var adapted));
         Assert.Equal(decoded.Timestamp, adapted.Timestamp);
         Assert.Equal(decoded.PublicKey.ToArray(), adapted.PublicKey.ToArray());
@@ -227,4 +256,9 @@ public class AdvertTests
             AdvertCodec.ValidateSignature(decoded).Match(left: _ => false, right: _ => true)
         );
     }
+
+    private static byte[] EncodeSuccess(AdvertPayload advert) =>
+        Assert.IsType<byte[]>(
+            AdvertCodec.Encode(advert).Match<object>(left: error => error, right: bytes => bytes)
+        );
 }

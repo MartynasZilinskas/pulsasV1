@@ -25,13 +25,22 @@ public static class ControlCodec
         return new ControlPayload((ControlSubtype)payload[0], [.. payload[1..]]);
     }
 
-    public static byte[] Encode(ControlPayload control)
+    public static Either<ControlEncodeError, byte[]> Encode(ControlPayload control)
     {
-        if (control.Body.IsDefault || control.Body.Length > PacketCodec.MaximumPayloadLength - 1)
+        if (control.Body.IsDefault)
         {
-            throw new ArgumentException("Invalid control wrapper body.", nameof(control));
+            return Either<ControlEncodeError, byte[]>.Left(
+                new(ControlEncodeErrorKind.UninitializedBody)
+            );
         }
 
-        return [control.SubtypeCode, .. control.Body];
+        if (control.Body.Length > PacketCodec.MaximumPayloadLength - 1)
+        {
+            return Either<ControlEncodeError, byte[]>.Left(
+                new(ControlEncodeErrorKind.InvalidBodyLength, control.Body.Length)
+            );
+        }
+
+        return Either<ControlEncodeError, byte[]>.Right([control.SubtypeCode, .. control.Body]);
     }
 }

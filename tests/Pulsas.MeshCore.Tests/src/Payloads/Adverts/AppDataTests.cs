@@ -81,7 +81,12 @@ public class AppDataTests
         );
         Assert.True(AdvertAppDataCodec.TryDecode(bytes, out var adapted));
         Assert.Equal(hasClaims ? new AdvertAppData(NodeRole.Repeater, Name: name) : null, adapted);
-        Assert.Equal(bytes, AdvertAppDataCodec.Encode(adapted));
+        Assert.Equal(
+            bytes,
+            AdvertAppDataCodec
+                .Encode(adapted)
+                .Match<object>(left: error => error, right: value => value)
+        );
     }
 
     [Fact]
@@ -99,7 +104,12 @@ public class AppDataTests
                     )
             );
             Assert.Equal(role, data.RoleCode);
-            Assert.Equal(new[] { role }, AdvertAppDataCodec.Encode(data));
+            Assert.Equal(
+                new[] { role },
+                AdvertAppDataCodec
+                    .Encode(data)
+                    .Match<object>(left: error => error, right: value => value)
+            );
         }
     }
 
@@ -107,7 +117,11 @@ public class AppDataTests
     public void Encodes_known_layout_with_optional_features_and_signed_integer_coordinates()
     {
         var input = new AdvertAppData(NodeRole.Repeater, -1, 0, 0x1234, 0x5678, "R1");
-        var bytes = AdvertAppDataCodec.Encode(input);
+        var bytes = Assert.IsType<byte[]>(
+            AdvertAppDataCodec
+                .Encode(input)
+                .Match<object>(left: error => error, right: value => value)
+        );
         Assert.Equal("f2ffffffff00000000341278565231", Convert.ToHexStringLower(bytes));
         Assert.True(AdvertAppDataCodec.TryDecode(bytes, out var decoded));
         Assert.Equal(input, decoded);
@@ -117,23 +131,91 @@ public class AppDataTests
     public void Preserves_unknown_role_and_geographically_invalid_claims()
     {
         var input = new AdvertAppData((NodeRole)15, int.MaxValue, int.MinValue, Name: "Ž");
+        var bytes = Assert.IsType<byte[]>(
+            AdvertAppDataCodec
+                .Encode(input)
+                .Match<object>(left: error => error, right: value => value)
+        );
         Assert.Equal(
             Option.Some(input),
             AdvertAppDataCodec
-                .Decode(AdvertAppDataCodec.Encode(input))
+                .Decode(bytes)
+                .Match<object>(left: error => error, right: value => value)
+        );
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(255)]
+    public void Encode_rejects_role_outside_four_bits(byte role)
+    {
+        Assert.Equal(
+            new AdvertAppDataEncodeError(AdvertAppDataEncodeErrorKind.InvalidRole),
+            AdvertAppDataCodec
+                .Encode(new((NodeRole)role))
+                .Match<object>(left: error => error, right: value => value)
+        );
+    }
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(null, 0)]
+    public void Encode_requires_both_coordinates(int? latitude, int? longitude)
+    {
+        Assert.Equal(
+            new AdvertAppDataEncodeError(AdvertAppDataEncodeErrorKind.IncompleteCoordinates),
+            AdvertAppDataCodec
+                .Encode(new(NodeRole.Repeater, latitude, longitude))
                 .Match<object>(left: error => error, right: value => value)
         );
     }
 
     [Fact]
-    public void Rejects_invalid_construction()
+    public void Encode_returns_invalid_name_for_unpaired_surrogate()
     {
-        Assert.Throws<ArgumentException>(() => AdvertAppDataCodec.Encode(new((NodeRole)16)));
-        Assert.Throws<ArgumentException>(() =>
-            AdvertAppDataCodec.Encode(new(NodeRole.Repeater, LatitudeMicrodegrees: 0))
+        Assert.Equal(
+            new AdvertAppDataEncodeError(AdvertAppDataEncodeErrorKind.InvalidName),
+            AdvertAppDataCodec
+                .Encode(new(NodeRole.Repeater, Name: "\ud800"))
+                .Match<object>(left: error => error, right: value => value)
         );
-        Assert.Throws<ArgumentException>(() =>
-            AdvertAppDataCodec.Encode(new(NodeRole.Repeater, Name: new string('Ž', 16)))
+    }
+
+    [Theory]
+    [InlineData("x", 31, false, 32)]
+    [InlineData("Ž", 15, false, 31)]
+    [InlineData("x", 19, true, 32)]
+    [InlineData("Ž", 9, true, 31)]
+    public void Encode_enforces_total_UTF8_byte_limit_including_optional_fields(
+        string character,
+        int count,
+        bool fields,
+        int length
+    )
+    {
+        var name = string.Concat(Enumerable.Repeat(character, count));
+        var input = new AdvertAppData(
+            NodeRole.Repeater,
+            fields ? -1 : null,
+            fields ? 0 : null,
+            fields ? (ushort)1 : null,
+            fields ? (ushort)2 : null,
+            name
+        );
+        var bytes = Assert.IsType<byte[]>(
+            AdvertAppDataCodec
+                .Encode(input)
+                .Match<object>(left: error => error, right: value => value)
+        );
+        Assert.Equal(length, bytes.Length);
+        Assert.True(AdvertAppDataCodec.TryDecode(bytes, out var decoded));
+        Assert.Equal(input, decoded);
+        var oversized = input with { Name = name + character };
+        Assert.Equal(
+            new AdvertAppDataEncodeError(AdvertAppDataEncodeErrorKind.InvalidLength, 33),
+            AdvertAppDataCodec
+                .Encode(oversized)
+                .Match<object>(left: error => error, right: value => value)
         );
     }
 }

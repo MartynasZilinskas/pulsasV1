@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Payloads.GroupText;
@@ -36,7 +35,7 @@ public class GroupTextTests
             Enumerable.Range(0, size).Select(i => (byte)i).ToArray()
         );
         var message = new GroupTextMessage(1_700_000_000, text, attempt);
-        Assert.Equal(hex, Convert.ToHexStringLower(GroupTextCodec.Encode(message, key)));
+        Assert.Equal(hex, Convert.ToHexStringLower(EncodeSuccess(message, key)));
         var decoded = GroupTextCodec.Decode(Convert.FromHexString(hex), key);
         Assert.Equal(message, decoded.Match<object>(left: error => error, right: value => value));
     }
@@ -53,21 +52,57 @@ public class GroupTextTests
                 Assert.Equal(
                     message,
                     GroupTextCodec
-                        .Decode(GroupTextCodec.Encode(message, key), key)
+                        .Decode(EncodeSuccess(message, key), key)
                         .Match<object>(left: error => error, right: value => value)
                 );
             }
         }
+    }
 
-        Assert.Throws<ArgumentException>(() =>
-            GroupTextCodec.Encode(new(0, new string('x', 172)), key)
+    [Theory]
+    [InlineData(4)]
+    [InlineData(255)]
+    public void Encode_rejects_attempts_outside_two_bits(byte attempt)
+    {
+        using var key = GroupChannelKey.StandardPublic();
+        Assert.Equal(
+            new GroupTextEncodeError(GroupTextEncodeErrorKind.InvalidAttempt),
+            GroupTextCodec
+                .Encode(new(0, "", attempt), key)
+                .Match<object>(left: error => error, right: value => value)
         );
-        Assert.Throws<ArgumentException>(() =>
-            GroupTextCodec.Encode(new(0, new string('Ž', 86)), key)
+    }
+
+    [Fact]
+    public void Encode_distinguishes_embedded_NUL_and_invalid_Unicode()
+    {
+        using var key = GroupChannelKey.StandardPublic();
+        Assert.Equal(
+            new GroupTextEncodeError(GroupTextEncodeErrorKind.EmbeddedNul),
+            GroupTextCodec
+                .Encode(new(0, "a\0b"), key)
+                .Match<object>(left: error => error, right: value => value)
         );
-        Assert.Throws<ArgumentException>(() => GroupTextCodec.Encode(new(0, "a\0b"), key));
-        Assert.Throws<ArgumentOutOfRangeException>(() => GroupTextCodec.Encode(new(0, "", 4), key));
-        Assert.Throws<EncoderFallbackException>(() => GroupTextCodec.Encode(new(0, "\ud800"), key));
+        Assert.Equal(
+            new GroupTextEncodeError(GroupTextEncodeErrorKind.InvalidText),
+            GroupTextCodec
+                .Encode(new(0, new string('\ud800', 1)), key)
+                .Match<object>(left: error => error, right: value => value)
+        );
+    }
+
+    [Theory]
+    [InlineData('x', 172, 172)]
+    [InlineData('Ž', 86, 172)]
+    public void Encode_returns_rejected_UTF8_byte_length(char character, int count, int length)
+    {
+        using var key = GroupChannelKey.StandardPublic();
+        Assert.Equal(
+            new GroupTextEncodeError(GroupTextEncodeErrorKind.InvalidTextLength, length),
+            GroupTextCodec
+                .Encode(new(0, new string(character, count)), key)
+                .Match<object>(left: error => error, right: value => value)
+        );
     }
 
     [Fact]
@@ -75,7 +110,7 @@ public class GroupTextTests
     {
         byte[] secret = [.. Enumerable.Range(0, 16).Select(i => (byte)i)];
         using var key = new GroupChannelKey(secret);
-        var payload = GroupTextCodec.Encode(new(0, "hello"), key);
+        var payload = EncodeSuccess(new(0, "hello"), key);
         var otherChannel = payload.ToArray();
         otherChannel[0] ^= 1;
         Assert.Equal(
@@ -129,14 +164,15 @@ public class GroupTextTests
     {
         byte[] secret = [.. Enumerable.Range(0, 16).Select(i => (byte)i)];
         using var key = new GroupChannelKey(secret);
-        var expected = GroupTextCodec.Encode(new(0, "hello"), key);
+        var expected = EncodeSuccess(new(0, "hello"), key);
         Array.Fill(secret, (byte)0xff);
-        Assert.Equal(expected, GroupTextCodec.Encode(new(0, "hello"), key));
+        Assert.Equal(expected, EncodeSuccess(new(0, "hello"), key));
         // The span-only secret constructor is intentionally not a JSON contract.
         // System.Text.Json rejects it rather than serializing any secret bytes.
         Assert.Throws<InvalidOperationException>(() => JsonSerializer.Serialize(key));
         key.Dispose();
         Assert.Throws<ObjectDisposedException>(() => GroupTextCodec.Encode(new(0, "hello"), key));
+        Assert.Throws<ObjectDisposedException>(() => GroupTextCodec.Encode(new(0, "a\0b", 4), key));
         Assert.Throws<ObjectDisposedException>(() => GroupTextCodec.Decode([], key));
         key.Dispose();
         Assert.Throws<ArgumentException>(() => new GroupChannelKey(new byte[15]));
@@ -150,15 +186,22 @@ public class GroupTextTests
         using var standard = GroupChannelKey.StandardPublic();
         Assert.Equal(
             "115246432e02124c1477aaa2fd962c103d8a1f",
-            Convert.ToHexStringLower(GroupTextCodec.Encode(new(0, ""), standard))
+            Convert.ToHexStringLower(EncodeSuccess(new(0, ""), standard))
         );
         using var hashtag = GroupChannelKey.FromHashtag("#Test ");
         Assert.Equal(
             "0434817f4304cc4fdd0258a3bef93bfff669df",
-            Convert.ToHexStringLower(GroupTextCodec.Encode(new(0, ""), hashtag))
+            Convert.ToHexStringLower(EncodeSuccess(new(0, ""), hashtag))
         );
         Assert.Throws<ArgumentException>(() => GroupChannelKey.FromHashtag("test"));
     }
+
+    private static byte[] EncodeSuccess(GroupTextMessage message, GroupChannelKey key) =>
+        Assert.IsType<byte[]>(
+            GroupTextCodec
+                .Encode(message, key)
+                .Match<object>(left: error => error, right: value => value)
+        );
 
     private static byte[] InvalidTextPayload(byte[] key, byte flags, byte text)
     {

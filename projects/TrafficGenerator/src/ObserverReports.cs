@@ -30,16 +30,29 @@ public static class ObserverReports
 
     public static string CreateAdvert(AdvertSigningKey sender, int round, DateTimeOffset at)
     {
-        var appData = AdvertAppDataCodec.Encode(new(NodeRole.Repeater, Name: $"synthetic-{round}"));
+        var appData = AdvertAppDataCodec
+            .Encode(new(NodeRole.Repeater, Name: $"synthetic-{round}"))
+            .Match(
+                left: error =>
+                    throw new InvalidOperationException(
+                        $"Invalid synthetic ADVERT app data: {error.Kind}."
+                    ),
+                right: bytes => bytes
+            );
         var advert = AdvertCodec.CreateSigned(
             sender,
             checked((uint)at.ToUnixTimeSeconds()),
             appData
         );
+        var payload = AdvertCodec
+            .Encode(advert)
+            .Match(
+                left: error =>
+                    throw new InvalidOperationException($"Invalid synthetic ADVERT: {error.Kind}."),
+                right: bytes => bytes
+            );
         return Convert.ToHexStringLower(
-            PacketCodec.Encode(
-                PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
-            )
+            PacketCodec.Encode(PacketCodec.Create(RouteType.Flood, PacketType.Advert, payload))
         );
     }
 

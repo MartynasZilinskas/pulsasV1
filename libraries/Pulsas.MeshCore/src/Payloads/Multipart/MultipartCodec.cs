@@ -30,22 +30,39 @@ public static class MultipartCodec
         );
     }
 
-    public static byte[] Encode(MultipartPayload multipart)
+    public static Either<MultipartEncodeError, byte[]> Encode(MultipartPayload multipart)
     {
-        if (
-            multipart.Remaining > 15
-            || (byte)multipart.PayloadType > 15
-            || multipart.Body.IsDefault
-            || multipart.Body.Length > PacketCodec.MaximumPayloadLength - 1
-        )
+        if (multipart.Remaining > 15)
         {
-            throw new ArgumentException("Invalid multipart wrapper fields.", nameof(multipart));
+            return Either<MultipartEncodeError, byte[]>.Left(
+                new(MultipartEncodeErrorKind.InvalidRemaining)
+            );
         }
 
-        return
-        [
+        if ((byte)multipart.PayloadType > 15)
+        {
+            return Either<MultipartEncodeError, byte[]>.Left(
+                new(MultipartEncodeErrorKind.InvalidPayloadType)
+            );
+        }
+
+        if (multipart.Body.IsDefault)
+        {
+            return Either<MultipartEncodeError, byte[]>.Left(
+                new(MultipartEncodeErrorKind.UninitializedBody)
+            );
+        }
+
+        if (multipart.Body.Length > PacketCodec.MaximumPayloadLength - 1)
+        {
+            return Either<MultipartEncodeError, byte[]>.Left(
+                new(MultipartEncodeErrorKind.InvalidBodyLength, multipart.Body.Length)
+            );
+        }
+
+        return Either<MultipartEncodeError, byte[]>.Right([
             (byte)((multipart.Remaining << 4) | (byte)multipart.PayloadType),
             .. multipart.Body,
-        ];
+        ]);
     }
 }

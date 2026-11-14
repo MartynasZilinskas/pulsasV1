@@ -105,37 +105,53 @@ public static class AdvertAppDataCodec
         return Option.Some(data);
     }
 
-    public static byte[] Encode(AdvertAppData? data)
+    public static Either<AdvertAppDataEncodeError, byte[]> Encode(AdvertAppData? data)
     {
         if (data is null)
         {
-            return [];
+            return Either<AdvertAppDataEncodeError, byte[]>.Right([]);
         }
 
-        if (
-            data.RoleCode > 15
-            || data.LatitudeMicrodegrees.HasValue != data.LongitudeMicrodegrees.HasValue
-        )
+        if (data.RoleCode > 15)
         {
-            throw new ArgumentException(
-                "Role must fit four bits; coordinates must be supplied together.",
-                nameof(data)
+            return Either<AdvertAppDataEncodeError, byte[]>.Left(
+                new(AdvertAppDataEncodeErrorKind.InvalidRole)
             );
         }
 
-        var name = data.Name is null ? [] : Utf8.GetBytes(data.Name);
-        var bytes = new byte[
-            1
-                + (data.LatitudeMicrodegrees.HasValue ? 8 : 0)
-                + (data.Feature1.HasValue ? 2 : 0)
-                + (data.Feature2.HasValue ? 2 : 0)
-                + name.Length
-        ];
-        if (bytes.Length > AdvertCodec.MaximumAppDataLength)
+        if (data.LatitudeMicrodegrees.HasValue != data.LongitudeMicrodegrees.HasValue)
         {
-            throw new ArgumentException("ADVERT application data exceeds 32 bytes.", nameof(data));
+            return Either<AdvertAppDataEncodeError, byte[]>.Left(
+                new(AdvertAppDataEncodeErrorKind.IncompleteCoordinates)
+            );
         }
 
+        byte[] name;
+        try
+        {
+            name = data.Name is null ? [] : Utf8.GetBytes(data.Name);
+        }
+        catch (EncoderFallbackException)
+        {
+            return Either<AdvertAppDataEncodeError, byte[]>.Left(
+                new(AdvertAppDataEncodeErrorKind.InvalidName)
+            );
+        }
+
+        var length =
+            1
+            + (data.LatitudeMicrodegrees.HasValue ? 8 : 0)
+            + (data.Feature1.HasValue ? 2 : 0)
+            + (data.Feature2.HasValue ? 2 : 0)
+            + name.Length;
+        if (length > AdvertCodec.MaximumAppDataLength)
+        {
+            return Either<AdvertAppDataEncodeError, byte[]>.Left(
+                new(AdvertAppDataEncodeErrorKind.InvalidLength, length)
+            );
+        }
+
+        var bytes = new byte[length];
         bytes[0] = (byte)(
             data.RoleCode
             | (data.LatitudeMicrodegrees.HasValue ? 0x10 : 0)

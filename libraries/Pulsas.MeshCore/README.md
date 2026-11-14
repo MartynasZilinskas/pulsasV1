@@ -35,9 +35,11 @@ Console.WriteLine(outcome);
   Funcky `Either` results. App-data decoding returns
   `Either<AdvertAppDataDecodeError, Option<AdvertAppData>>`: empty bytes are a
   successful `None`, and failures can carry partial fixed-field claims.
-  Existing `TryDecode` APIs remain compatibility adapters. ACK encoding also
-  returns `Either`; other invalid construction and native crypto failures can
-  still throw.
+  Existing `TryDecode` APIs remain compatibility adapters. ADVERT, ACK, control,
+  multipart, ADVERT app-data, and group-text encoding also return typed `Either`
+  results. `GetSignedMaterial`, `CreateSigned`, and boolean `Verify` retain
+  exceptions for malformed ADVERT construction; native crypto and key-lifetime
+  failures can still throw.
 - Packet limits: 255-byte packet, 64-byte path, 184-byte payload, at most 63 path
   entries. Decode preserves future versions and reserved width-four paths; inspect
   support flags before interpretation. TRACE path bytes are not ordinary hops.

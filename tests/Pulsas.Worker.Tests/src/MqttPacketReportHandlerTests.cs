@@ -73,8 +73,11 @@ public class MqttPacketReportHandlerTests
         var observer = new ObserverIdentity(new string('b', 64), "observer");
         using var sender = AdvertSigningKey.Generate();
         var advert = AdvertCodec.CreateSigned(sender, 1, Convert.FromHexString(hex));
+        var payload = Assert.IsType<byte[]>(
+            AdvertCodec.Encode(advert).Match<object>(left: error => error, right: bytes => bytes)
+        );
         var raw = PacketCodec.Encode(
-            PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
+            PacketCodec.Create(RouteType.Flood, PacketType.Advert, payload)
         );
         handler.Handle(
             $"meshcore/KUN/{observer.PublicKey}/packets",

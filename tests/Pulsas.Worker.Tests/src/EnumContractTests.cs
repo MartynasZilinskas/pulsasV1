@@ -6,6 +6,7 @@ using Pulsas.MeshCore.Payloads.Acks;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Pulsas.MeshCore.Payloads.Control;
 using Pulsas.MeshCore.Payloads.GroupText;
+using Pulsas.MeshCore.Payloads.Multipart;
 using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.Persistence;
@@ -34,9 +35,14 @@ public class EnumContractTests
     [InlineData(typeof(ScopeResolutionStatus), nameof(ScopeResolutionStatus.NotAssessed))]
     [InlineData(typeof(PacketDecodeErrorKind), nameof(PacketDecodeErrorKind.Unknown))]
     [InlineData(typeof(AckErrorKind), nameof(AckErrorKind.Unknown))]
+    [InlineData(typeof(ControlEncodeErrorKind), nameof(ControlEncodeErrorKind.Unknown))]
+    [InlineData(typeof(MultipartEncodeErrorKind), nameof(MultipartEncodeErrorKind.Unknown))]
     [InlineData(typeof(AdvertSignatureErrorKind), nameof(AdvertSignatureErrorKind.Unknown))]
+    [InlineData(typeof(AdvertEncodeErrorKind), nameof(AdvertEncodeErrorKind.Unknown))]
     [InlineData(typeof(GroupTextDecodeErrorKind), nameof(GroupTextDecodeErrorKind.Unknown))]
+    [InlineData(typeof(GroupTextEncodeErrorKind), nameof(GroupTextEncodeErrorKind.Unknown))]
     [InlineData(typeof(AdvertAppDataDecodeErrorKind), nameof(AdvertAppDataDecodeErrorKind.Unknown))]
+    [InlineData(typeof(AdvertAppDataEncodeErrorKind), nameof(AdvertAppDataEncodeErrorKind.Unknown))]
     public void Application_enum_default_is_uninitialized(Type type, string expected)
     {
         Assert.Equal(expected, Enum.GetName(type, Activator.CreateInstance(type)!));

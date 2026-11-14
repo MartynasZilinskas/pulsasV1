@@ -217,8 +217,11 @@ public class PacketProcessingTests
     {
         using var sender = AdvertSigningKey.Generate();
         var advert = AdvertCodec.CreateSigned(sender, 1, Convert.FromHexString(hex));
+        var payload = Assert.IsType<byte[]>(
+            AdvertCodec.Encode(advert).Match<object>(left: error => error, right: bytes => bytes)
+        );
         var raw = PacketCodec.Encode(
-            PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
+            PacketCodec.Create(RouteType.Flood, PacketType.Advert, payload)
         );
         var packet = Assert.IsType<PacketOutcome.Decoded>(Process(Convert.ToHexString(raw)).Packet);
         var interpretation = Assert.IsType<PayloadInterpretation.Advert>(packet.Interpretation);
@@ -235,8 +238,11 @@ public class PacketProcessingTests
     {
         using var sender = AdvertSigningKey.Generate();
         var advert = AdvertCodec.CreateSigned(sender, 1, []);
+        var payload = Assert.IsType<byte[]>(
+            AdvertCodec.Encode(advert).Match<object>(left: error => error, right: bytes => bytes)
+        );
         var raw = PacketCodec.Encode(
-            PacketCodec.Create(RouteType.Flood, PacketType.Advert, AdvertCodec.Encode(advert))
+            PacketCodec.Create(RouteType.Flood, PacketType.Advert, payload)
         );
         var packet = Assert.IsType<PacketOutcome.Decoded>(Process(Convert.ToHexString(raw)).Packet);
         var interpretation = Assert.IsType<PayloadInterpretation.Advert>(packet.Interpretation);
