@@ -6,10 +6,10 @@ namespace Pulsas.PacketProcessing.Contracts.Processing;
 
 public interface IPacketProcessingManager
 {
-    public record Input(ImmutableArray<byte> OriginalReport, ReportContext Context);
+    record Input(ImmutableArray<byte> OriginalReport, ReportContext Context);
 
     // In-memory interpretation only; this result does not imply a database commit.
-    public record Result(Input Input, PacketReport Report, PacketOutcome Packet);
+    record Result(Input Input, PacketReport Report, PacketOutcome Packet);
 
     Either<ReportError, Result> Process(Input input);
 }

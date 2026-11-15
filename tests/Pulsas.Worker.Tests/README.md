@@ -1,8 +1,8 @@
 # Dummy Worker tests
 
-Normal solution tests validate configuration and exercise generator reports through
-the real packet handler, including recovery after invalid input. The opt-in broker test exercises
-the production consumer, both subscriptions, ADVERT interpretation, and shutdown.
+Normal solution tests validate configuration and callback acknowledgment after
+durable acceptance. The opt-in broker test exercises the production consumer,
+both subscriptions, forwarding to a test-only receiver, and shutdown.
 It publishes only synthetic, non-retained data in region `TST`.
 
 Against an isolated local WebSocket broker:
@@ -13,9 +13,9 @@ PULSAS_WORKER_MQTT_ENDPOINT=ws://127.0.0.1:9001/mqtt \
 ```
 
 Do not point this at a shared or external broker. This proves transport receipt
-and ADVERT interpretation using a test-only projection recorder, not database persistence.
+and durable-acceptance forwarding using a test-only receiver, not database persistence.
 For the real generator path, run Aspire, wait for Worker health, start traffic,
-and inspect node projection logs and `node_information` in Drizzle.
+and inspect `packet_receptions`, queue archives and `node_information` in Drizzle.
 
 ## Cached PostGIS geography
 
@@ -52,16 +52,22 @@ node/region writes and deletions in both lock orders. Lock assertions observe re
 PostgreSQL advisory-lock waits, not timing-only sleeps. Repeatable-read writes are
 explicitly rejected by the current implementation.
 
-The same Aspire resource runs `AdvertIntegrationTests`, exercising the real handler,
+The same Aspire resource runs `AdvertIntegrationTests`, exercising the real manager,
 codec, signature verification, atomic node writer and PostGIS assignment. The fixture
 requires the retained KUN/PLQ/SQQ/VNO regions and never imports or replaces them.
 It verifies ordering, concurrent public-key upserts, omissions/reset, malformed metadata,
 coordinate bounds, signature rejection and future-skew policy. Each case removes only
 its own random-key node. Generated demonstration nodes are not removed by this suite.
 
+`AdvertIntegrationTestsDelivery` exercises the production queue receiver and processor
+against test-owned random PGMQ queues in the migrated database. It verifies durable
+acceptance, transactional ingestion/content rollback, retry exhaustion/quarantine,
+per-reception clock context and malformed-packet evidence. It drops only its queues
+and removes its own generated entities. It does not drain or purge production queues.
+
 ## PGMQ transaction and ordering spike
 
-Npgmq **1.13.0** is currently a test-only dependency. These opt-in tests use the
+Npgmq **1.13.0** is used by Worker and this boundary spike. These opt-in tests use the
 production EF model but do not wire MQTT ingestion, path assessment, or frontend
 events. They create randomly named databases and drop **only those databases**
 afterward. Never point them at an existing development or provider database.

@@ -4,10 +4,10 @@ Incremental migration of Pulsas. Includes a MeshCore codec library, local
 infrastructure, Worker/Gateway foundations, and an observer traffic generator.
 Local Aspire runs build a [PostGIS + PGMQ image](projects/AppHost/containers/postgres/README.md);
 deployment will use the provider's image. PGMQ transaction/ordering tests are
-opt-in; the queue is not connected to ingestion yet.
-Worker interprets packet reports and persists verified ADVERT node metadata. Aspire applies the persistence schema
+opt-in. Development Worker durably queues MQTT reports, persists packet/content/reception
+evidence, and processes verified ADVERT metadata through grouped content work. Aspire applies the persistence schema
 through the `database-setup` resource; PostGIS maintains cached node-region
-assignments. Packet/reception storage, chat linking, path assessment and domain
+assignments. Chat linking, path assessment and domain
 GraphQL queries are not wired yet.
 
 The [packet-processing project structure](projects/PacketProcessing/README.md)
@@ -89,17 +89,23 @@ then start traffic. Open **worker → Logs** in the Aspire dashboard:
 ```text
 Dummy MQTT consumer subscribed to meshcore/VNO/+/status and meshcore/VNO/+/packets
 Dummy MQTT received meshcore/VNO/<observer>/packets: ... bytes, QoS AtLeastOnce, retained False
-Packet report interpreted: observer ..., region VNO, packet Decoded, type Advert, payload Advert, advertiser ..., signature Verified, metadata Decoded; packet/reception not stored
 ```
 
-This Development-only consumer logs receipt metadata and interprets packet
-reports: validates observer/topic consistency, decodes packets and verifies ADVERT
-signatures while retaining partial metadata. Status messages remain receipt-only.
-Observer claims are not authenticated. Invalid reports are rejected; malformed
-packets and unknown payloads remain interpretation outcomes. Verified ADVERTs upsert
+The Development-only MQTT callback acknowledges packet reports after durable
+acceptance into PGMQ `ingestion`. An ingestion consumer validates observer/topic
+consistency and stores deduplicated packets/content plus a distinct reception for
+each accepted report. In the same transaction it enqueues `packet_content` work
+and archives ingestion. Content work groups by type, payload version and full
+payload hash; node projection and work completion commit together.
+Status messages remain receipt-only; observer claims are not authenticated.
+Invalid reports and exhausted retries go to `ingestion_quarantine` with their
+original envelopes and reasons. Malformed packets remain reception evidence;
+unknown content remains opaque. Verified ADVERTs upsert
 nodes by public key with strictly newer signed timestamps; duplicates/equal timestamps
 do not churn metadata. See the persistence README for omission/reset and clock rules.
-Reports/packets/receptions are not stored or notified to GraphQL. Logs omit raw report bytes and chat text.
+Original reports remain in queue archives. No domain events are notified to GraphQL.
+Logs omit raw report bytes and chat text. Queue archives/quarantine contain report data
+and require database-level access protection; no automated retention or replay is provided.
 It requests QoS 1, retries connection/subscription failures every five seconds,
 and resubscribes after disconnects. Messages sent while disconnected can be lost;
 QoS 1 can deliver duplicates. Worker `/health` is unhealthy until subscribed.
@@ -109,6 +115,10 @@ Aspire supplies `DummyMqtt__Endpoint`. For standalone development it defaults to
 generator region, set the Worker region to match. No consumer runs in Production.
 Standalone Worker also requires `ConnectionStrings:pulsas` for the migrated database;
 Aspire injects it and waits for migrations before starting Worker.
+`ReportDelivery` configures `MaximumAttempts` (5), `RetryDelaySeconds` (5) and
+`PollDelayMilliseconds` (250). Queue names are fixed to the migration-provisioned
+topology; application configuration does not override them. Tests explicitly inject
+isolated queues. No per-node ADVERT queue is used.
 
 ## MQTT and MeshCore
 

@@ -8,6 +8,7 @@
       CopyToPublishDirectory="PreserveNewest"
     />
     <PackageReference Include="MQTTnet" />
+    <PackageReference Include="Npgmq" />
     <ProjectReference Include="../PacketProcessing/Core/Pulsas.PacketProcessing.Core.csproj" />
     <ProjectReference Include="../Persistence/Pulsas.Persistence.csproj" />
     <ProjectReference Include="../../libraries/Pulsas.ServiceDefaults/Pulsas.ServiceDefaults.csproj" />

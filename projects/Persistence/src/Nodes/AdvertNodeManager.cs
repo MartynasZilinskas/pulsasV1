@@ -12,8 +12,7 @@ using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
 namespace Pulsas.Persistence.Nodes;
 
 // A node projection only: packet/reception evidence is deliberately not fabricated.
-public class AdvertNodeManager(IDbContextFactory<TrackingDbContext> databases, IClock clock)
-    : IAdvertNodeManager
+public class AdvertNodeManager(TrackingDbContext database, IClock clock) : IAdvertNodeManager
 {
     private const int MaximumFutureSkewSeconds = 300;
 
@@ -45,32 +44,16 @@ public class AdvertNodeManager(IDbContextFactory<TrackingDbContext> databases, I
         var advert = input.Advert;
         var now = clock.GetCurrentInstant();
         var key = advert.PublicKey.ToArray();
-        await using var database = await databases.CreateDbContextAsync(cancellationToken);
         if (await database.MeshNodes.AnyAsync(node => node.PublicKey == key, cancellationToken))
         {
-            await UpdateMetadataAsync(
-                database,
-                key,
-                metadata,
-                advert.Timestamp,
-                now,
-                cancellationToken
-            );
+            await UpdateMetadataAsync(key, metadata, advert.Timestamp, now, cancellationToken);
             return Unit.Value;
         }
 
-        return await CreateNodeAsync(
-            database,
-            key,
-            metadata,
-            advert.Timestamp,
-            now,
-            cancellationToken
-        );
+        return await CreateNodeAsync(key, metadata, advert.Timestamp, now, cancellationToken);
     }
 
     private async Task<Either<ProcessAdvertError, Unit>> CreateNodeAsync(
-        TrackingDbContext database,
         byte[] key,
         Option<Metadata> metadata,
         long timestamp,
@@ -164,8 +147,7 @@ public class AdvertNodeManager(IDbContextFactory<TrackingDbContext> databases, I
             },
         };
 
-    private static Task UpdateMetadataAsync(
-        TrackingDbContext database,
+    private Task UpdateMetadataAsync(
         byte[] key,
         Option<Metadata> metadata,
         long timestamp,
@@ -174,12 +156,10 @@ public class AdvertNodeManager(IDbContextFactory<TrackingDbContext> databases, I
     ) =>
         metadata.Match(
             none: () => Task.CompletedTask,
-            some: value =>
-                UpdateMetadataAsync(database, key, value, timestamp, now, cancellationToken)
+            some: value => UpdateMetadataAsync(key, value, timestamp, now, cancellationToken)
         );
 
-    private static Task UpdateMetadataAsync(
-        TrackingDbContext database,
+    private Task UpdateMetadataAsync(
         byte[] key,
         Metadata metadata,
         long timestamp,

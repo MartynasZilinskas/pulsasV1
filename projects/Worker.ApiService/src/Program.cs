@@ -4,10 +4,12 @@ using Pulsas.Configuration;
 using Pulsas.PacketProcessing.Contracts.Processing;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
+using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
 using Pulsas.ServiceDefaults;
 using Pulsas.Worker.ApiService;
 using Pulsas.Worker.ApiService.Configuration;
+using Pulsas.Worker.ApiService.Delivery;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddSecretJsonFiles(Environment.GetEnvironmentVariable("PULSAS_SECRETS_PATH"));
@@ -24,9 +26,37 @@ if (builder.Environment.IsDevelopment())
         TrackingDatabase.Configure(options, connectionString)
     );
     builder.Services.AddSingleton<IClock>(SystemClock.Instance);
-    builder.Services.AddSingleton<IAdvertNodeManager, AdvertNodeManager>();
+    builder.Services.AddScoped<IAdvertNodeManager, AdvertNodeManager>();
     builder.Services.AddSingleton<IPacketProcessingManager, PacketProcessingManager>();
-    builder.Services.AddSingleton<MqttPacketReportHandler>();
+    builder.Services.AddSingleton<IReportReceiver, ReportReceiver>();
+    builder.Services.AddScoped<IReportIngestionManager, ReportIngestionManager>();
+    builder.Services.AddScoped<ReportQueueProcessor>();
+    builder
+        .Services.AddOptions<ReportDeliveryOptions>()
+        .Configure<IConfiguration>(
+            (options, configuration) =>
+            {
+                var delivery = configuration.GetSection("ReportDelivery");
+                options.MaximumAttempts = delivery.GetValue(
+                    nameof(options.MaximumAttempts),
+                    options.MaximumAttempts
+                );
+                options.RetryDelaySeconds = delivery.GetValue(
+                    nameof(options.RetryDelaySeconds),
+                    options.RetryDelaySeconds
+                );
+                options.PollDelayMilliseconds = delivery.GetValue(
+                    nameof(options.PollDelayMilliseconds),
+                    options.PollDelayMilliseconds
+                );
+            }
+        )
+        .Validate(
+            options => options.IsValid(),
+            "ReportDelivery requires distinct valid queue names, positive attempt/poll limits and a nonnegative retry delay."
+        )
+        .ValidateOnStart();
+    builder.Services.AddHostedService<ReportQueueConsumer>();
     builder
         .Services.AddOptions<DummyMqttOptions>()
         .BindConfiguration("DummyMqtt")

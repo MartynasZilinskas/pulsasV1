@@ -6,9 +6,9 @@ namespace Pulsas.Persistence.Nodes;
 
 public interface IAdvertNodeManager
 {
-    public record ProcessAdvertInput(AdvertPayload Advert, DateTimeOffset ArrivedAt);
+    record ProcessAdvertInput(AdvertPayload Advert, DateTimeOffset ArrivedAt);
 
-    public enum ProcessAdvertError
+    enum ProcessAdvertError
     {
         InvalidSignature,
         ConcurrentNodeCreation,

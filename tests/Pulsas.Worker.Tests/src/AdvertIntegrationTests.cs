@@ -2,16 +2,12 @@ using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Logging.Abstractions;
 using NodaTime;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Payloads.Adverts;
-using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Nodes;
-using Pulsas.TrafficGenerator;
-using Pulsas.Worker.ApiService;
 using Xunit;
 using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
 
@@ -40,6 +36,28 @@ public class AdvertIntegrationTests
     private static readonly DatabaseFactory Databases = new();
     private static readonly DateTimeOffset At = new(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
     private static readonly uint Timestamp = (uint)At.ToUnixTimeSeconds();
+
+    private class ContextPerAttemptAdvertNodeManager(
+        IDbContextFactory<TrackingDbContext> databases,
+        IClock clock
+    ) : IAdvertNodeManager
+    {
+        public async Task<Either<ProcessAdvertError, Unit>> ProcessAdvertAsync(
+            ProcessAdvertInput input,
+            CancellationToken cancellationToken
+        )
+        {
+            await using var database = await databases.CreateDbContextAsync(cancellationToken);
+            return await new AdvertNodeManager(database, clock).ProcessAdvertAsync(
+                input,
+                cancellationToken
+            );
+        }
+    }
+
+    private static IAdvertNodeManager Manager(
+        IDbContextFactory<TrackingDbContext>? databases = null
+    ) => new ContextPerAttemptAdvertNodeManager(databases ?? Databases, SystemClock.Instance);
 
     private static AdvertPayload Signed(
         AdvertSigningKey key,
@@ -107,7 +125,7 @@ public class AdvertIntegrationTests
         using var key = AdvertSigningKey.Generate();
         var publicKey = key.PublicKey.ToArray();
         var race = new CreationRace();
-        var manager = new AdvertNodeManager(new DatabaseFactory(race), SystemClock.Instance);
+        var manager = Manager(new DatabaseFactory(race));
         try
         {
             var outcomes = await Task.WhenAll(
@@ -151,63 +169,11 @@ public class AdvertIntegrationTests
     }
 
     [GeographyFact]
-    public async Task Handler_projects_generator_advert_and_real_regions_without_packet_evidence()
-    {
-        using var key = AdvertSigningKey.Generate();
-        var publicKey = key.PublicKey.ToArray();
-        var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
-        var handler = new MqttPacketReportHandler(
-            new PacketProcessingManager(),
-            manager,
-            NullLogger<MqttPacketReportHandler>.Instance
-        );
-        var observer = new ObserverIdentity(new string('b', 64), "test-observer");
-        try
-        {
-            var codes = new[] { "KUN", "PLQ", "SQQ", "VNO" };
-            for (var round = 1; round <= 4; round++)
-            {
-                var at = At.AddSeconds(round);
-                await handler.HandleAsync(
-                    $"meshcore/KUN/{observer.PublicKey}/packets",
-                    ObserverReports.Packet(
-                        observer,
-                        ObserverReports.CreateAdvert(key, round, at),
-                        at
-                    ),
-                    at,
-                    CancellationToken.None
-                );
-                var node = await Read(publicKey);
-                await using var database = Databases.CreateDbContext();
-                Assert.Equal(
-                    codes[round - 1],
-                    (
-                        await database.Regions.SingleAsync(region =>
-                            region.Id == node.LocationRegionId
-                        )
-                    ).Code
-                );
-                Assert.Equal($"synthetic-{round}", node.Name);
-                Assert.Equal(NodeRole.Repeater, node.Role);
-                Assert.Equal(MeshNodeSourceType.ObservedAdvert, node.SourceType);
-                Assert.Equal((long)Timestamp + round, node.AdvertMetadataTimestamp);
-                Assert.Null(node.LatestAdvertPacketId);
-                Assert.Null(node.LatestAdvertHeardAt);
-            }
-        }
-        finally
-        {
-            await Remove(publicKey);
-        }
-    }
-
-    [GeographyFact]
     public async Task Stale_equal_omitted_and_reset_claims_preserve_required_state()
     {
         using var key = AdvertSigningKey.Generate();
         var publicKey = key.PublicKey.ToArray();
-        var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
+        var manager = Manager();
         async Task Apply(uint time, AdvertAppData data) =>
             AssertSuccess(
                 await manager.ProcessAdvertAsync(
@@ -267,7 +233,7 @@ public class AdvertIntegrationTests
     {
         using var key = AdvertSigningKey.Generate();
         var publicKey = key.PublicKey.ToArray();
-        var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
+        var manager = Manager();
         var advert = kind switch
         {
             "empty" => Signed(key, Timestamp + 1, null),
@@ -315,7 +281,7 @@ public class AdvertIntegrationTests
     {
         using var key = AdvertSigningKey.Generate();
         var publicKey = key.PublicKey.ToArray();
-        var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
+        var manager = Manager();
         var valid = Signed(key, Timestamp, new(NodeRole.Repeater, Name: "valid"));
         var tampered = valid with { Timestamp = Timestamp + 1 };
         try
@@ -353,7 +319,7 @@ public class AdvertIntegrationTests
     {
         using var key = AdvertSigningKey.Generate();
         var publicKey = key.PublicKey.ToArray();
-        var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
+        var manager = Manager();
         try
         {
             // Seed the identity so these calls exercise concurrent updates rather than insertion conflicts.
@@ -423,7 +389,7 @@ public class AdvertIntegrationTests
         var publicKey = key.PublicKey.ToArray();
         try
         {
-            var manager = new AdvertNodeManager(Databases, SystemClock.Instance);
+            var manager = Manager();
             AssertSuccess(
                 await manager.ProcessAdvertAsync(
                     new(

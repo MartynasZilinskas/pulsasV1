@@ -4,15 +4,15 @@ using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Formatter;
 using MQTTnet.Protocol;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using Pulsas.Worker.ApiService.Delivery;
 
 namespace Pulsas.Worker.ApiService;
 
-// Development-only transport with verified ADVERT node projection.
+// Development-only transport; acknowledgment follows durable report acceptance.
 public class DummyMqttConsumer(
     IOptions<DummyMqttOptions> options,
     ILogger<DummyMqttConsumer> logger,
-    MqttPacketReportHandler packets
+    IReportReceiver reports
 ) : BackgroundService, IHealthCheck
 {
     private readonly IMqttClient client = new MqttClientFactory().CreateMqttClient();
@@ -153,29 +153,15 @@ public class DummyMqttConsumer(
         {
             try
             {
-                var processed = await packets.HandleAsync(
-                    args.ApplicationMessage.Topic,
-                    args.ApplicationMessage.Payload.ToArray(),
-                    arrivedAt,
+                await reports.ReceiveReportAsync(
+                    new(
+                        Guid.NewGuid(),
+                        [.. args.ApplicationMessage.Payload.ToArray()],
+                        args.ApplicationMessage.Topic,
+                        options.Value.Endpoint,
+                        arrivedAt
+                    ),
                     cancellationToken
-                );
-                processed.Switch(
-                    left: error =>
-                    {
-                        if (error == ProcessAdvertError.ConcurrentNodeCreation)
-                        {
-                            args.AutoAcknowledge = false;
-                            logger.LogWarning(
-                                "ADVERT processing conflicted: {Reason}; delivery not acknowledged. This consumer has no guaranteed redelivery.",
-                                error
-                            );
-                        }
-                        else
-                        {
-                            logger.LogWarning("ADVERT dismissed: {Reason}", error);
-                        }
-                    },
-                    right: _ => { }
                 );
             }
             catch
@@ -193,7 +179,7 @@ public class DummyMqttConsumer(
         Task.FromResult(
             subscribed && client.IsConnected
                 ? HealthCheckResult.Healthy(
-                    "MQTT subscriptions are active; verified ADVERTs project node metadata."
+                    "MQTT subscriptions are active; packet reports are durably queued before acknowledgment."
                 )
                 : HealthCheckResult.Unhealthy("Dummy MQTT consumer is not subscribed.")
         );

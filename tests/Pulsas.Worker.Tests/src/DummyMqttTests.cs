@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Funcky;
-using Funcky.Monads;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,12 +9,11 @@ using MQTTnet.Formatter;
 using MQTTnet.Packets;
 using MQTTnet.Protocol;
 using Pulsas.MeshCore.Cryptography;
-using Pulsas.PacketProcessing.Core.Processing;
-using Pulsas.Persistence.Nodes;
 using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService;
+using Pulsas.Worker.ApiService.Delivery;
 using Xunit;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using static Pulsas.Worker.ApiService.Delivery.IReportReceiver;
 
 namespace Pulsas.Worker.Tests;
 
@@ -25,33 +23,22 @@ public class DummyMqttTests
     [InlineData("success")]
     [InlineData("failure")]
     [InlineData("canceled")]
-    [InlineData("conflict")]
-    [InlineData("invalid-signature")]
-    public async Task Callback_awaits_projection_and_only_allows_acknowledgment_on_success(
+    public async Task Callback_awaits_durable_acceptance_and_only_acknowledges_on_success(
         string outcome
     )
     {
-        var projection = new TaskCompletionSource<Either<ProcessAdvertError, Unit>>(
+        var acceptance = new TaskCompletionSource<Unit>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        var nodes = new PendingProjection(projection.Task);
+        var receiver = new PendingAcceptance(acceptance.Task);
         using var consumer = new DummyMqttConsumer(
             Options.Create(new DummyMqttOptions()),
             new CaptureLogger<DummyMqttConsumer>(),
-            new MqttPacketReportHandler(
-                new PacketProcessingManager(),
-                nodes,
-                new CaptureLogger<MqttPacketReportHandler>()
-            )
+            receiver
         );
-        using var key = AdvertSigningKey.Generate();
-        var at = DateTimeOffset.UtcNow;
-        var observer = new ObserverIdentity(new string('b', 64), "test");
         var message = new MqttApplicationMessageBuilder()
-            .WithTopic($"meshcore/VNO/{observer.PublicKey}/packets")
-            .WithPayload(
-                ObserverReports.Packet(observer, ObserverReports.CreateAdvert(key, 1, at), at)
-            )
+            .WithTopic("meshcore/VNO/test/packets")
+            .WithPayload([1, 2, 3])
             .Build();
         var args = new MqttApplicationMessageReceivedEventArgs(
             "test",
@@ -68,14 +55,14 @@ public class DummyMqttTests
         Assert.False(handling.IsCompleted);
         if (outcome == "success")
         {
-            projection.SetResult(Either<ProcessAdvertError, Unit>.Right(default));
+            acceptance.SetResult(Unit.Value);
             await handling;
             Assert.True(args.AutoAcknowledge);
         }
         else if (outcome == "failure")
         {
-            var failure = new InvalidOperationException("projection failed");
-            projection.SetException(failure);
+            var failure = new InvalidOperationException("acceptance failed");
+            acceptance.SetException(failure);
             Assert.Same(
                 failure,
                 await Assert.ThrowsAsync<InvalidOperationException>(() => handling)
@@ -84,29 +71,16 @@ public class DummyMqttTests
         }
         else if (outcome == "canceled")
         {
-            projection.SetCanceled();
+            acceptance.SetCanceled();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handling);
             Assert.False(args.AutoAcknowledge);
         }
-        else
-        {
-            projection.SetResult(
-                Either<ProcessAdvertError, Unit>.Left(
-                    outcome == "conflict"
-                        ? ProcessAdvertError.ConcurrentNodeCreation
-                        : ProcessAdvertError.InvalidSignature
-                )
-            );
-            await handling;
-            Assert.Equal(outcome != "conflict", args.AutoAcknowledge);
-        }
     }
 
-    private class PendingProjection(Task<Either<ProcessAdvertError, Unit>> completion)
-        : IAdvertNodeManager
+    private class PendingAcceptance(Task<Unit> completion) : IReportReceiver
     {
-        public Task<Either<ProcessAdvertError, Unit>> ProcessAdvertAsync(
-            ProcessAdvertInput input,
+        public Task<Unit> ReceiveReportAsync(
+            ReceiveReportInput input,
             CancellationToken cancellationToken
         ) => completion;
     }
@@ -150,15 +124,11 @@ public class DummyMqttTests
         Assert.True(Uri.TryCreate(endpoint, UriKind.Absolute, out var uri));
         Assert.True(uri.IsLoopback, "This opt-in test is restricted to a local broker.");
         var logger = new CaptureLogger<DummyMqttConsumer>();
-        var processingLogger = new CaptureLogger<MqttPacketReportHandler>();
+        var received = new CaptureReports();
         using var consumer = new DummyMqttConsumer(
             Options.Create(new DummyMqttOptions { Endpoint = endpoint, Region = "TST" }),
             logger,
-            new MqttPacketReportHandler(
-                new PacketProcessingManager(),
-                new CaptureAdvertNodeManager(),
-                processingLogger
-            )
+            received
         );
         var context = new HealthCheckContext();
         Assert.Equal(
@@ -219,11 +189,7 @@ public class DummyMqttTests
                     .Build(),
                 token
             );
-            while (
-                !processingLogger.Messages.Any(message =>
-                    message.Contains("signature Verified") && message.Contains("not stored")
-                )
-            )
+            while (!received.Inputs.Any(input => input.Topic.Contains(identity.PublicKey)))
             {
                 await Task.Delay(25, token);
             }
@@ -237,6 +203,21 @@ public class DummyMqttTests
             HealthStatus.Unhealthy,
             (await consumer.CheckHealthAsync(context, token)).Status
         );
+    }
+
+    private class CaptureReports : IReportReceiver
+    {
+        public ConcurrentQueue<ReceiveReportInput> Inputs { get; } = new();
+
+        public Task<Unit> ReceiveReportAsync(
+            ReceiveReportInput input,
+            CancellationToken cancellationToken
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Inputs.Enqueue(input);
+            return Task.FromResult(Unit.Value);
+        }
     }
 
     private class WorkerBrokerFactAttribute : FactAttribute

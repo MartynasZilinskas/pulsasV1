@@ -44,8 +44,9 @@ a competing public-key insertion returns `ProcessAdvertError.ConcurrentNodeCreat
 without an internal retry. The contract is `Either<ProcessAdvertError, Unit>`:
 successful writes and no-ops return Right; invalid signatures return Left.
 The delivery layer owns retry/dismissal policy and must preserve original receipt
-time on retries. Current MQTT handling suppresses acknowledgment on a conflict
-but provides no guaranteed redelivery; durable queue ingestion remains pending.
+time on retries. MQTT acknowledges only durable enqueue. Queue delivery commits
+retry state, or commits quarantine together with source completion. MQTT still uses clean sessions and
+does not guarantee reports missed while disconnected or before durable acceptance.
 `AdvertMetadataTimestamp` is nullable
 signed-body Unix seconds, not a reception/hearing time. Only strictly newer claims
 update metadata; equal timestamps keep the first accepted values.
@@ -62,12 +63,33 @@ update metadata; equal timestamps keep the first accepted values.
   the publisher's report timestamp is not used as the clock reference.
 - Existing IDs, creation times and source classifications survive updates. New
   identities use `ObservedAdvert`. Packet references and radio-hearing timestamps
-  are not invented: packet/content/reception persistence remains unimplemented.
+  are not invented: ingestion stores real packet/content/reception evidence,
+  but node latest-packet/hearing links and path assessment are not implemented.
 
-Worker awaits database completion independently of logging. Unexpected failures
-propagate and disable automatic acknowledgment; signature rejections are logged
-and acknowledged as terminal dismissals. This development
-consumer still uses clean MQTT sessions, so this is not a durable retry/queue design.
+The manager receives a scoped context and makes one attempt. Content delivery owns
+its transaction, so node effects and queue archival commit or roll back together.
+Unexpected failures propagate to delivery, which applies bounded retries; invalid
+signatures are quarantined as terminal dismissals without altering nodes.
+
+## Durable report delivery
+
+The additive queue migration requires PGMQ 1.11.1 or later (local image: 1.13.1).
+It creates logged `ingestion`, `packet_content` (with FIFO index), and
+`ingestion_quarantine` queues. Down migration deliberately refuses to delete accepted
+work; drain and explicitly retire queues before attempting schema rollback.
+
+Ingestion deduplicates contents by `(Type, PayloadVersion, PayloadHash)` and packets
+by full SHA-256 of their raw bytes. Every received callback gets a stable reception
+ID retained through retries; separate reports, including byte-identical reports,
+remain separate reception evidence. Broker endpoint comes from adapter configuration;
+regions must already exist. Publisher timestamps are not radio-hearing evidence,
+so `HeardAt` stays null. Unsupported/malformed packet evidence is retained.
+
+Ingestion effects, downstream enqueue and source archival use one transaction.
+Each reception with a decoded packet generates grouped content work, retaining its
+own original arrival time for ADVERT skew policy. A post-claim savepoint rolls back
+failed effects while preserving the queue attempt count; terminal/exhausted messages
+are archived and quarantined atomically. Cancellation rolls back and propagates.
 
 ## Cached node geography
 
