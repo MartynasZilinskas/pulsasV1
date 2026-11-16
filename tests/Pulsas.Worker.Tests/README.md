@@ -65,6 +65,13 @@ acceptance, transactional ingestion/content rollback, retry exhaustion/quarantin
 per-reception clock context and malformed-packet evidence. It drops only its queues
 and removes its own generated entities. It does not drain or purge production queues.
 
+The GroupText cases in the same fixture use synthetic in-memory channel
+configuration, test-owned channel rows and the real encryption codec. They exercise
+configured matching, canonical message deduplication across attempts/paths, packet
+and reception links, ambiguity/opaque handling, transaction rollback and retries.
+Catalogue lifecycle checks roll back their entire transaction so retained channel
+metadata and historical messages are preserved. Tests never read operator key files.
+
 ## PGMQ transaction and ordering spike
 
 Npgmq **1.13.0** is used by Worker and this boundary spike. These opt-in tests use the

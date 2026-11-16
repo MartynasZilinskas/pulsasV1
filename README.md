@@ -5,9 +5,9 @@ infrastructure, Worker/Gateway foundations, and an observer traffic generator.
 Local Aspire runs build a [PostGIS + PGMQ image](projects/AppHost/containers/postgres/README.md);
 deployment will use the provider's image. PGMQ transaction/ordering tests are
 opt-in. Development Worker durably queues MQTT reports, persists packet/content/reception
-evidence, and processes verified ADVERT metadata through grouped content work. Aspire applies the persistence schema
+evidence, and processes verified ADVERT metadata and configured GroupText chat through grouped content work. Aspire applies the persistence schema
 through the `database-setup` resource; PostGIS maintains cached node-region
-assignments. Chat linking, path assessment and domain
+assignments. Path assessment and domain
 GraphQL queries are not wired yet.
 
 The [packet-processing project structure](projects/PacketProcessing/README.md)
@@ -104,6 +104,11 @@ unknown content remains opaque. Verified ADVERTs upsert
 nodes by public key with strictly newer signed timestamps; duplicates/equal timestamps
 do not churn metadata. See the persistence README for omission/reset and clock rules.
 Original reports remain in queue archives. No domain events are notified to GraphQL.
+GroupText uses configured channel keys; exactly one successful channel decode is
+required. Unknown, malformed and ambiguous matches stay opaque. Chat messages
+deduplicate by channel, message timestamp and exact decoded text, excluding the
+attempt counter and packet path; all packets/receptions remain separate evidence.
+Sender prefixes remain unverified text, not authenticated node identities.
 Logs omit raw report bytes and chat text. Queue archives/quarantine contain report data
 and require database-level access protection; no automated retention or replay is provided.
 It requests QoS 1, retries connection/subscription failures every five seconds,
@@ -119,6 +124,14 @@ Aspire injects it and waits for migrations before starting Worker.
 `PollDelayMilliseconds` (250). Queue names are fixed to the migration-provisioned
 topology; application configuration does not override them. Tests explicitly inject
 isolated queues. No per-node ADVERT queue is used.
+
+Before consumers start, Worker atomically reconciles configured channels. Removed
+channels become inactive and non-public; historical messages and links remain.
+Workers sharing the database must use the same authoritative startup configuration.
+Channel keys remain in memory and are never persisted. Configuration changes do not
+automatically replay archived content or reassign existing message links.
+No channels are enabled by default: select a channel configuration through
+`PULSAS_SECRETS_PATH` as described in [configuration](configuration/README.md).
 
 ## MQTT and MeshCore
 

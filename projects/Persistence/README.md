@@ -91,6 +91,30 @@ own original arrival time for ADVERT skew policy. A post-claim savepoint rolls b
 failed effects while preserving the queue attempt count; terminal/exhausted messages
 are archived and quarantined atomically. Cancellation rolls back and propagates.
 
+## GroupText chat projection
+
+The scoped Worker GroupText manager uses the same content-delivery transaction
+for message creation, packet linking and queue archival. Receptions reference the
+linked packet; no reception or publisher timestamp is invented.
+
+Configured channels are reconciled before consumers start. Keys are never stored;
+channel identities and publication flags are. Removed entries become inactive and
+non-public, preserving history. One authoritative configuration snapshot per shared
+database is required.
+
+Chat message `PayloadHash` is SHA-256 over the four-byte little-endian message
+timestamp followed by exact decoded UTF-8 text. Together with channel identity it
+deduplicates attempt/path variants. Packet/content wire hashes remain unchanged.
+Full text, including any claimed sender prefix, is preserved; `ClaimedSenderName`
+remains null and no authenticated sender/node association is inferred. `SentAt` is
+the untrusted message timestamp, not a hearing time.
+
+Unknown keys, malformed/unsupported text, and multiple successful channel matches
+are opaque successful no-ops with original evidence retained. Existing links are
+idempotent and never silently reassigned. Exact message-creation conflicts return
+to delivery for bounded retry; unexpected exceptions and cancellation propagate.
+There is no automatic replay after configuration changes or GraphQL publication.
+
 ## Cached node geography
 
 PostGIS triggers maintain `MeshNode.LocationRegionId` for **all database writers**,

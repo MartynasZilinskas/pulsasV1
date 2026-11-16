@@ -12,8 +12,10 @@ using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
 using Pulsas.Persistence.Receptions;
+using Pulsas.Worker.ApiService.Chat;
 using static Pulsas.Persistence.Ingestion.IReportIngestionManager;
 using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using static Pulsas.Worker.ApiService.Chat.IGroupTextManager;
 using static Pulsas.Worker.ApiService.Delivery.IReportReceiver;
 
 namespace Pulsas.Worker.ApiService.Delivery;
@@ -24,9 +26,10 @@ public class ReportQueueProcessor(
     IPacketProcessingManager interpretation,
     IReportIngestionManager ingestion,
     IAdvertNodeManager nodes,
+    IGroupTextManager groupText,
     IOptions<ReportDeliveryOptions> options,
     ILogger<ReportQueueProcessor> logger
-)
+) : IReportQueueProcessor
 {
     private record Failure(string Reason, bool Retryable);
 
@@ -222,21 +225,44 @@ public class ReportQueueProcessor(
         {
             return new("MissingReceptionPacket", false);
         }
-        if (packet.Type != PacketType.Advert || packet.Content.PayloadVersion != 0)
+        if (packet.Content.PayloadVersion != 0)
         {
             // Opaque/future content is preserved; no unsupported domain effect is invented.
             return null;
         }
-        return await AdvertCodec
-            .Decode(packet.Content.Payload)
+        return packet.Type switch
+        {
+            PacketType.GroupText => await ProcessGroupTextAsync(packet.Id, cancellationToken),
+            PacketType.Advert => await ProcessAdvertAsync(
+                packet.Content.Payload,
+                reception.ArrivedAt.ToDateTimeOffset(),
+                cancellationToken
+            ),
+            _ => null,
+        };
+    }
+
+    private async Task<Failure?> ProcessGroupTextAsync(
+        Guid packetId,
+        CancellationToken cancellationToken
+    ) =>
+        (await groupText.ProcessGroupTextAsync(new(packetId), cancellationToken)).Match<Failure?>(
+            left: error => new(error.ToString(), error == ProcessGroupTextError.ConcurrentCreation),
+            right: _ => null
+        );
+
+    private Task<Failure?> ProcessAdvertAsync(
+        byte[] payload,
+        DateTimeOffset arrivedAt,
+        CancellationToken cancellationToken
+    ) =>
+        AdvertCodec
+            .Decode(payload)
             .Match(
                 left: error => Task.FromResult<Failure?>(new($"MalformedAdvert:{error}", false)),
                 right: async advert =>
                     (
-                        await nodes.ProcessAdvertAsync(
-                            new(advert, reception.ArrivedAt.ToDateTimeOffset()),
-                            cancellationToken
-                        )
+                        await nodes.ProcessAdvertAsync(new(advert, arrivedAt), cancellationToken)
                     ).Match<Failure?>(
                         left: error =>
                             new(
@@ -246,7 +272,6 @@ public class ReportQueueProcessor(
                         right: _ => null
                     )
             );
-    }
 
     private static async Task ArchiveAsync(
         NpgmqClient queue,

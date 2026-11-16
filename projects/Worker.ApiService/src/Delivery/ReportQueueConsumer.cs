@@ -10,8 +10,10 @@ public class ReportQueueConsumer(
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
         Task.WhenAll(
-            ConsumeAsync(options.Value.IngestionQueue, stoppingToken),
-            ConsumeAsync(options.Value.ContentQueue, stoppingToken)
+            Enumerable
+                .Range(0, options.Value.ContentConcurrency)
+                .Select(_ => ConsumeAsync(options.Value.ContentQueue, stoppingToken))
+                .Prepend(ConsumeAsync(options.Value.IngestionQueue, stoppingToken))
         );
 
     private async Task ConsumeAsync(string queueName, CancellationToken cancellationToken)
@@ -25,7 +27,7 @@ public class ReportQueueConsumer(
                 {
                     await using var scope = scopes.CreateAsyncScope();
                     handled = await scope
-                        .ServiceProvider.GetRequiredService<ReportQueueProcessor>()
+                        .ServiceProvider.GetRequiredService<IReportQueueProcessor>()
                         .ProcessNextAsync(queueName, cancellationToken);
                 }
                 catch (OperationCanceledException)

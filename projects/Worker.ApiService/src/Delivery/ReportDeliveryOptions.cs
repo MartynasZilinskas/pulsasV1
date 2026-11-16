@@ -9,11 +9,13 @@ public record ReportDeliveryOptions
     public int MaximumAttempts { get; set; } = 5;
     public int RetryDelaySeconds { get; set; } = 5;
     public int PollDelayMilliseconds { get; set; } = 250;
+    public int ContentConcurrency { get; set; } = 4;
 
     public bool IsValid() =>
         MaximumAttempts > 0
         && RetryDelaySeconds >= 0
         && PollDelayMilliseconds > 0
+        && ContentConcurrency > 0
         && new[] { IngestionQueue, ContentQueue, QuarantineQueue }
             .Distinct(StringComparer.Ordinal)
             .Count() == 3

@@ -8,6 +8,7 @@ using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
 using Pulsas.ServiceDefaults;
 using Pulsas.Worker.ApiService;
+using Pulsas.Worker.ApiService.Chat;
 using Pulsas.Worker.ApiService.Configuration;
 using Pulsas.Worker.ApiService.Delivery;
 
@@ -30,7 +31,9 @@ if (builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IPacketProcessingManager, PacketProcessingManager>();
     builder.Services.AddSingleton<IReportReceiver, ReportReceiver>();
     builder.Services.AddScoped<IReportIngestionManager, ReportIngestionManager>();
-    builder.Services.AddScoped<ReportQueueProcessor>();
+    builder.Services.AddScoped<IReportQueueProcessor, ReportQueueProcessor>();
+    builder.Services.AddScoped<IGroupTextManager, GroupTextManager>();
+    builder.Services.AddScoped<IChannelCatalogueManager, ChannelCatalogueManager>();
     builder
         .Services.AddOptions<ReportDeliveryOptions>()
         .Configure<IConfiguration>(
@@ -49,13 +52,18 @@ if (builder.Environment.IsDevelopment())
                     nameof(options.PollDelayMilliseconds),
                     options.PollDelayMilliseconds
                 );
+                options.ContentConcurrency = delivery.GetValue(
+                    nameof(options.ContentConcurrency),
+                    options.ContentConcurrency
+                );
             }
         )
         .Validate(
             options => options.IsValid(),
-            "ReportDelivery requires distinct valid queue names, positive attempt/poll limits and a nonnegative retry delay."
+            "ReportDelivery requires distinct valid queue names, positive attempt/poll/concurrency limits and a nonnegative retry delay."
         )
         .ValidateOnStart();
+    builder.Services.AddHostedService<ChannelCatalogueInitializer>();
     builder.Services.AddHostedService<ReportQueueConsumer>();
     builder
         .Services.AddOptions<DummyMqttOptions>()

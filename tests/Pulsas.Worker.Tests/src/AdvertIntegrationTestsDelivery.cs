@@ -24,7 +24,7 @@ using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
 
 namespace Pulsas.Worker.Tests;
 
-public class AdvertIntegrationTestsDelivery : IAsyncLifetime
+public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
 {
     private readonly ReportDeliveryOptions settings = new()
     {
@@ -174,13 +174,20 @@ public class AdvertIntegrationTestsDelivery : IAsyncLifetime
     private ReportQueueProcessor Processor(
         TrackingDbContext database,
         IAdvertNodeManager? nodes = null,
-        IReportIngestionManager? ingestion = null
+        IReportIngestionManager? ingestion = null,
+        Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
+        Pulsas.Worker.ApiService.Chat.IGroupTextManager? groupText = null
     ) =>
         new(
             database,
             new PacketProcessingManager(),
             ingestion ?? new ReportIngestionManager(database, SystemClock.Instance),
             nodes ?? new AdvertNodeManager(database, SystemClock.Instance),
+            groupText ?? new Pulsas.Worker.ApiService.Chat.GroupTextManager(
+                database,
+                packetConfiguration ?? EmptyPacketConfiguration(),
+                SystemClock.Instance
+            ),
             Options.Create(settings),
             NullLogger<ReportQueueProcessor>.Instance
         );
@@ -188,12 +195,20 @@ public class AdvertIntegrationTestsDelivery : IAsyncLifetime
     private async Task<bool> Process(
         string queue,
         Func<TrackingDbContext, IAdvertNodeManager>? nodes = null,
-        Func<TrackingDbContext, IReportIngestionManager>? ingestion = null
+        Func<TrackingDbContext, IReportIngestionManager>? ingestion = null,
+        Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
+        Func<TrackingDbContext, Pulsas.Worker.ApiService.Chat.IGroupTextManager>? groupText = null
     )
     {
         await using var database = new DeliveryDatabaseFactory().CreateDbContext();
         queue = queue == ReportQueues.Ingestion ? settings.IngestionQueue : settings.ContentQueue;
-        return await Processor(database, nodes?.Invoke(database), ingestion?.Invoke(database))
+        return await Processor(
+                database,
+                nodes?.Invoke(database),
+                ingestion?.Invoke(database),
+                packetConfiguration,
+                groupText?.Invoke(database)
+            )
             .ProcessNextAsync(queue, CancellationToken.None);
     }
 

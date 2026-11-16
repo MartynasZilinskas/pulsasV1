@@ -3,7 +3,8 @@
 Interprets observer packet reports in memory: packet decoding, ADVERT signatures and
 application data. Retains malformed/unsupported content and partial metadata.
 Core is storage-free. Worker durably queues reports and persists interpreted evidence
-through Persistence; chat linking, path assessment and domain subscriptions are not wired yet.
+through Persistence. Worker links configured GroupText chat; path assessment and
+domain subscriptions are not wired yet.
 
 | Project | Responsibility |
 | --- | --- |
@@ -12,5 +13,5 @@ through Persistence; chat linking, path assessment and domain subscriptions are 
 | [Persistence](../Persistence/) | Database storage, transactions and change notifications |
 | GraphQL | Queries and subscriptions for processed results |
 
-Worker hosts MQTT input, transactional ingestion and grouped ADVERT processing;
+Worker hosts MQTT input, transactional ingestion and grouped ADVERT/GroupText processing;
 Gateway hosts GraphQL. Notifications for affected packets are not implemented yet.

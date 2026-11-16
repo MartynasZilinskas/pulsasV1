@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace Pulsas.Worker.ApiService.Configuration;
 
-// Immutable startup snapshot. Reconciliation and packet processing consume this in later slices.
+// Immutable startup snapshot for channel reconciliation and content processing.
 public class PacketConfiguration
 {
     private PacketConfiguration(

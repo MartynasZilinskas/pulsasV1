@@ -45,6 +45,7 @@ public class ReportDeliveryOptionsTests
     [Fact]
     public void Defaults_and_distinct_isolated_names_are_valid()
     {
+        Assert.Equal(4, new ReportDeliveryOptions().ContentConcurrency);
         Assert.True(new ReportDeliveryOptions().IsValid());
         Assert.True(
             new ReportDeliveryOptions
@@ -55,4 +56,16 @@ public class ReportDeliveryOptionsTests
             }.IsValid()
         );
     }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(8, true)]
+    [InlineData(16, true)]
+    public void Validates_content_concurrency(int concurrency, bool valid) =>
+        Assert.Equal(
+            valid,
+            new ReportDeliveryOptions { ContentConcurrency = concurrency }.IsValid()
+        );
 }
