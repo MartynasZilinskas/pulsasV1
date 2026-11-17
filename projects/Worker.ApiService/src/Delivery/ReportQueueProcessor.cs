@@ -11,7 +11,6 @@ using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
-using Pulsas.Persistence.Receptions;
 using Pulsas.Worker.ApiService.Chat;
 using static Pulsas.Persistence.Ingestion.IReportIngestionManager;
 using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
@@ -155,8 +154,8 @@ public class ReportQueueProcessor(
             parts.Length != 4
             || parts[0] != "meshcore"
             || parts[3] != "packets"
-            || parts[1].Length is < 3 or > 4
-            || !parts[1].All(char.IsAsciiLetterUpper)
+            || string.IsNullOrEmpty(parts[1])
+            || parts[1].IndexOfAny(['+', '#', '\0']) >= 0
             || parts[2].Length != 64
             || !parts[2].All(char.IsAsciiHexDigit)
         )
@@ -173,7 +172,7 @@ public class ReportQueueProcessor(
             .Match(
                 left: error =>
                     Task.FromResult(
-                        Either<Failure, MeshPacketReception>.Left(new(error.ToString(), false))
+                        Either<Failure, IngestReportResult>.Left(new(error.ToString(), false))
                     ),
                 right: async result =>
                     (
@@ -188,8 +187,20 @@ public class ReportQueueProcessor(
             );
         return await stored.Match(
             left: error => Task.FromResult<Failure?>(error),
-            right: async reception =>
+            right: async result =>
             {
+                if (result.IsDuplicate)
+                {
+                    logger.LogInformation(
+                        "Duplicate reception {ReceptionId} from observer {Observer} via broker {Broker} arriving at {ArrivedAt}",
+                        result.Reception.Id,
+                        parts[2].ToLowerInvariant(),
+                        input.BrokerEndpoint,
+                        input.ArrivedAt
+                    );
+                    return null;
+                }
+                var reception = result.Reception;
                 if (reception.Packet is { } packet)
                 {
                     var group =

@@ -73,30 +73,44 @@ public class PacketProcessingTests
         );
     }
 
-    [Fact]
-    public void Observer_case_and_transport_region_do_not_freeze_generator_defaults()
+    [Theory]
+    [InlineData(null, " ")]
+    [InlineData("null", "north-east/Žemaitija 2026")]
+    [InlineData("42", " region ")]
+    [InlineData("{}", "north-east/Žemaitija 2026")]
+    [InlineData("\"malformed\"", "north-east/Žemaitija 2026")]
+    [InlineData(
+        "\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"",
+        "north-east/Žemaitija 2026"
+    )]
+    public void Observer_comes_only_from_context_and_region_has_no_prescribed_format(
+        string? origin,
+        string region
+    )
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(
-            new
-            {
-                origin_id = Observer.ToUpperInvariant(),
-                type = "PACKET",
-                direction = "rx",
-                raw = "050001",
-                RSSI = -72,
-                SNR = 4.25,
-            }
-        );
+        var report = new Dictionary<string, object?>
+        {
+            ["type"] = "PACKET",
+            ["direction"] = "rx",
+            ["raw"] = "050001",
+            ["RSSI"] = -72,
+            ["SNR"] = 4.25,
+        };
+        if (origin is not null)
+        {
+            report["origin_id"] = JsonSerializer.Deserialize<JsonElement>(origin);
+        }
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(report);
         var result = Success(
             manager.Process(
                 Input(bytes) with
                 {
-                    Context = new("import", "OTHER", Observer, Arrival),
+                    Context = new("import", region, Observer.ToUpperInvariant(), Arrival),
                 }
             )
         );
         Assert.Equal(Observer, result.Report.Observer);
-        Assert.Equal("OTHER", result.Input.Context.Region);
+        Assert.Equal(region, result.Input.Context.Region);
         Assert.Equal(-72, result.Report.Rssi);
         Assert.Equal(4.25, result.Report.Snr);
     }
@@ -112,7 +126,7 @@ public class PacketProcessingTests
     [Theory]
     [InlineData("{", ReportError.MalformedJson)]
     [InlineData("[]", ReportError.ExpectedObject)]
-    [InlineData("{}", ReportError.InvalidObserver)]
+    [InlineData("{}", ReportError.UnsupportedReport)]
     public void Rejects_bad_envelopes(string json, ReportError expected) =>
         Assert.Equal(
             expected,
@@ -124,22 +138,19 @@ public class PacketProcessingTests
                 )
         );
 
-    [Theory]
-    [InlineData("different", "rx", ReportError.ObserverMismatch)]
-    [InlineData("same", "tx", ReportError.UnsupportedReport)]
-    public void Rejects_mismatch_and_non_rx(string observer, string direction, ReportError expected)
+    [Fact]
+    public void Rejects_non_rx_reports()
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
-                origin_id = observer == "same" ? Observer : new string('b', 64),
                 type = "PACKET",
-                direction,
+                direction = "tx",
                 raw = "050001",
             }
         );
         Assert.Equal(
-            expected,
+            ReportError.UnsupportedReport,
             manager
                 .Process(Input(bytes))
                 .Match(

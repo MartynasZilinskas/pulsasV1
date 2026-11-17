@@ -84,7 +84,9 @@ archived content is not replayed automatically.
 
 Border paths are retained as supplied, not opened or imported; use absolute paths
 for future import. Scope reassessment, configured geography persistence and
-operational retention policies are not wired. Persisted region constraints still require the
-separately approved model change for operator-defined IDs. Aspire now applies the
-persistence schema and cached node-geography triggers, but does not import this
+operational retention policies are not wired. Region IDs have no prescribed format;
+MQTT transport requires a nonempty topic segment without `/`, `+`, `#` or NUL.
+Apply the `ReceptionIdentityAndRegionIdentifiers` migration before using the updated
+Worker; it also enables reception deduplication without rewriting historical rows.
+Aspire now applies the persistence schema and cached node-geography triggers, but does not import this
 configuration into that database; see [persistence](../projects/Persistence/README.md).

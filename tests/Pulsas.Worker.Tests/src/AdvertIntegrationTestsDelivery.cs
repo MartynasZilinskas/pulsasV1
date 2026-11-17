@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NodaTime;
@@ -15,7 +17,7 @@ using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
-using Pulsas.Persistence.Receptions;
+using Pulsas.Persistence.Regions;
 using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService.Delivery;
 using Xunit;
@@ -176,20 +178,22 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         IAdvertNodeManager? nodes = null,
         IReportIngestionManager? ingestion = null,
         Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
-        Pulsas.Worker.ApiService.Chat.IGroupTextManager? groupText = null
+        Pulsas.Worker.ApiService.Chat.IGroupTextManager? groupText = null,
+        ILogger<ReportQueueProcessor>? logger = null
     ) =>
         new(
             database,
             new PacketProcessingManager(),
             ingestion ?? new ReportIngestionManager(database, SystemClock.Instance),
             nodes ?? new AdvertNodeManager(database, SystemClock.Instance),
-            groupText ?? new Pulsas.Worker.ApiService.Chat.GroupTextManager(
-                database,
-                packetConfiguration ?? EmptyPacketConfiguration(),
-                SystemClock.Instance
-            ),
+            groupText
+                ?? new Pulsas.Worker.ApiService.Chat.GroupTextManager(
+                    database,
+                    packetConfiguration ?? EmptyPacketConfiguration(),
+                    SystemClock.Instance
+                ),
             Options.Create(settings),
-            NullLogger<ReportQueueProcessor>.Instance
+            logger ?? NullLogger<ReportQueueProcessor>.Instance
         );
 
     private async Task<bool> Process(
@@ -197,7 +201,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         Func<TrackingDbContext, IAdvertNodeManager>? nodes = null,
         Func<TrackingDbContext, IReportIngestionManager>? ingestion = null,
         Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
-        Func<TrackingDbContext, Pulsas.Worker.ApiService.Chat.IGroupTextManager>? groupText = null
+        Func<TrackingDbContext, Pulsas.Worker.ApiService.Chat.IGroupTextManager>? groupText = null,
+        ILogger<ReportQueueProcessor>? logger = null
     )
     {
         await using var database = new DeliveryDatabaseFactory().CreateDbContext();
@@ -207,7 +212,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
                 nodes?.Invoke(database),
                 ingestion?.Invoke(database),
                 packetConfiguration,
-                groupText?.Invoke(database)
+                groupText?.Invoke(database),
+                logger
             )
             .ProcessNextAsync(queue, CancellationToken.None);
     }
@@ -248,7 +254,7 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         Action arrived
     ) : IReportIngestionManager
     {
-        public async Task<Either<IngestReportError, MeshPacketReception>> IngestReportAsync(
+        public async Task<Either<IngestReportError, IngestReportResult>> IngestReportAsync(
             IngestReportInput input,
             CancellationToken cancellationToken
         )
@@ -259,8 +265,12 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         }
     }
 
-    [GeographyFact]
-    public async Task Concurrent_reports_share_packet_content_and_keep_distinct_receptions()
+    [GeographyTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Concurrent_reports_share_content_and_deduplicate_only_matching_receptions(
+        bool duplicate
+    )
     {
         using var key = AdvertSigningKey.Generate();
         await using var scenario = new ReportScenario(2, key);
@@ -269,12 +279,13 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         var ids = scenario.Receptions;
         var at = DateTimeOffset.UtcNow;
         var raw = ObserverReports.CreateAdvert(key, 1, at);
+        var logger = new ReceptionLogger();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         for (var index = 0; index < ids.Length; index++)
         {
             await scenario.ReceiveAsync(
                 settings,
-                ObserverReports.Packet(observer, raw, at),
+                ObserverReports.Packet(observer, raw, duplicate ? at : at.AddTicks(index)),
                 at,
                 index
             );
@@ -296,14 +307,16 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
                                 ready.TrySetResult();
                             }
                         }
-                    )
+                    ),
+                    logger: logger
                 )
                 .ProcessNextAsync(settings.IngestionQueue, timeout.Token);
         Assert.All(await Task.WhenAll(Attempt(first), Attempt(second)), Assert.True);
         // A classified creation conflict remains queued for a fresh-context attempt.
         for (
             var retry = 0;
-            retry < settings.MaximumAttempts && await Process(ReportQueues.Ingestion);
+            retry < settings.MaximumAttempts
+                && await Process(ReportQueues.Ingestion, logger: logger);
             retry++
         ) { }
         Assert.False(await Process(ReportQueues.Ingestion));
@@ -312,14 +325,115 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
             .MeshPacketReceptions.Where(row => ids.Contains(row.Id))
             .Include(row => row.Packet)
             .ToListAsync();
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(duplicate ? 1 : 2, rows.Count);
         Assert.Single(rows.Select(row => row.PacketId).Distinct());
         Assert.Single(rows.Select(row => row.Packet!.ContentId).Distinct());
         Assert.True(await Process(ReportQueues.Content));
-        Assert.True(await Process(ReportQueues.Content));
+        if (!duplicate)
+        {
+            Assert.True(await Process(ReportQueues.Content));
+        }
         Assert.False(await Process(ReportQueues.Content));
+        if (duplicate)
+        {
+            var entry = Assert.Single(logger.Duplicates);
+            Assert.Equal(rows[0].Id, entry["ReceptionId"]);
+            Assert.Equal(observer.PublicKey, entry["Observer"]);
+            Assert.Equal(broker, entry["Broker"]);
+            Assert.Equal(at, entry["ArrivedAt"]);
+
+            // Neither broker, region nor delivery arrival participates in reception identity.
+            var incomingBroker = $"ws://duplicate-{Guid.NewGuid():N}.invalid/mqtt";
+            await new ReportReceiver(
+                new DeliveryDatabaseFactory(),
+                Options.Create(settings)
+            ).ReceiveReportAsync(
+                new(
+                    Guid.NewGuid(),
+                    [.. ObserverReports.Packet(observer, raw, at)],
+                    $"meshcore/PLQ/{observer.PublicKey}/packets",
+                    incomingBroker,
+                    at.AddSeconds(1)
+                ),
+                timeout.Token
+            );
+            Assert.True(await Process(ReportQueues.Ingestion, logger: logger));
+            Assert.False(await Process(ReportQueues.Content));
+            Assert.Equal(2, logger.Duplicates.Count);
+            var repeated = logger.Duplicates.Last();
+            Assert.Equal(rows[0].Id, repeated["ReceptionId"]);
+            Assert.Equal(incomingBroker, repeated["Broker"]);
+            Assert.Equal(at.AddSeconds(1), repeated["ArrivedAt"]);
+            Assert.False(await check.Brokers.AnyAsync(item => item.Endpoint == incomingBroker));
+        }
         var queue = await QueueAsync(check);
         Assert.Empty(await queue.ReadBatchAsync<string>(settings.QuarantineQueue));
+    }
+
+    private class ReceptionLogger : ILogger<ReportQueueProcessor>
+    {
+        public ConcurrentQueue<Dictionary<string, object?>> Duplicates { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter
+        )
+        {
+            if (
+                logLevel == LogLevel.Information
+                && state is IEnumerable<KeyValuePair<string, object?>> fields
+            )
+            {
+                Duplicates.Enqueue(fields.ToDictionary());
+            }
+        }
+    }
+
+    [GeographyFact]
+    public async Task Queue_accepts_operator_defined_region_identifier()
+    {
+        var code = $"žemaitija-north_{Guid.NewGuid():N}";
+        await using var database = new DeliveryDatabaseFactory().CreateDbContext();
+        database.Regions.Add(
+            new StoredRegion
+            {
+                Id = Guid.NewGuid(),
+                Code = code,
+                CountryCode = "LT",
+            }
+        );
+        await database.SaveChangesAsync();
+        try
+        {
+            await using var scenario = new ReportScenario(1);
+            var at = DateTimeOffset.UtcNow;
+            await scenario.ReceiveAsync(
+                settings,
+                ObserverReports.Packet(scenario.Observer, "050001", at),
+                at,
+                topic: $"meshcore/{code}/{scenario.Observer.PublicKey}/packets"
+            );
+            Assert.True(await Process(ReportQueues.Ingestion));
+            var reception = await database.MeshPacketReceptions.SingleAsync(row =>
+                row.Id == scenario.Receptions[0]
+            );
+            Assert.Equal(code, reception.RegionCode);
+            Assert.NotNull(reception.ReceptionIdentity);
+            Assert.Null(reception.HeardAt);
+            Assert.True(await Process(ReportQueues.Content));
+        }
+        finally
+        {
+            await database.Regions.Where(row => row.Code == code).ExecuteDeleteAsync();
+        }
     }
 
     [GeographyFact]
@@ -342,7 +456,7 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
                 var raw = ObserverReports.CreateAdvert(index < 2 ? key : otherKey, 1, at);
                 await scenario.ReceiveAsync(
                     settings,
-                    ObserverReports.Packet(observer, raw, at),
+                    ObserverReports.Packet(observer, raw, at.AddTicks(index)),
                     at,
                     index
                 );
@@ -447,7 +561,7 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
     private class FailingIngestionAfterWrite(IReportIngestionManager inner)
         : IReportIngestionManager
     {
-        public async Task<Either<IngestReportError, MeshPacketReception>> IngestReportAsync(
+        public async Task<Either<IngestReportError, IngestReportResult>> IngestReportAsync(
             IngestReportInput input,
             CancellationToken cancellationToken
         )
@@ -513,11 +627,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
 
     [GeographyTheory]
     [InlineData("meshcore/invalid/invalid/packets", "InvalidTopic")]
-    [InlineData(
-        "meshcore/KUN/0000000000000000000000000000000000000000000000000000000000000000/packets",
-        "ObserverMismatch"
-    )]
-    public async Task Invalid_topic_and_observer_are_quarantined_before_following_valid_report(
+    [InlineData("meshcore/KUN/invalid/packets", "InvalidTopic")]
+    public async Task Invalid_topics_are_quarantined_before_following_valid_report(
         string topic,
         string expectedReason
     )
@@ -623,15 +734,28 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         bool hasRaw
     )
     {
-        await using var scenario = new ReportScenario(1);
+        await using var scenario = new ReportScenario(2);
         var observer = scenario.Observer;
         var broker = scenario.Broker;
         var reception = scenario.Receptions[0];
         var at = DateTimeOffset.UtcNow;
         await scenario.ReceiveAsync(settings, ObserverReports.Packet(observer, raw, at), at);
         Assert.True(await Process(ReportQueues.Ingestion));
+        await scenario.ReceiveAsync(
+            settings,
+            ObserverReports.Packet(observer, raw, at),
+            at.AddSeconds(1),
+            1
+        );
+        Assert.True(await Process(ReportQueues.Ingestion));
         await using var database = new DeliveryDatabaseFactory().CreateDbContext();
         var stored = await database.MeshPacketReceptions.SingleAsync(row => row.Id == reception);
+        Assert.Equal(
+            hasRaw ? 1 : 2,
+            await database.MeshPacketReceptions.CountAsync(row =>
+                scenario.Receptions.Contains(row.Id)
+            )
+        );
         Assert.Null(stored.PacketId);
         Assert.Null(stored.HeardAt);
         Assert.Equal(hasRaw, stored.RawPacket is not null);
@@ -748,7 +872,7 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         await scenario.ReceiveAsync(settings, ObserverReports.Packet(observer, raw, at), at);
         await scenario.ReceiveAsync(
             settings,
-            ObserverReports.Packet(observer, raw, at),
+            ObserverReports.Packet(observer, raw, at.AddSeconds(2)),
             at.AddSeconds(2),
             1
         );

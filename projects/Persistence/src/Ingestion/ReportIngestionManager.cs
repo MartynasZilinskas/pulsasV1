@@ -17,19 +17,38 @@ namespace Pulsas.Persistence.Ingestion;
 public class ReportIngestionManager(TrackingDbContext database, IClock clock)
     : IReportIngestionManager
 {
-    public async Task<Either<IngestReportError, MeshPacketReception>> IngestReportAsync(
+    public async Task<Either<IngestReportError, IngestReportResult>> IngestReportAsync(
         IngestReportInput input,
         CancellationToken cancellationToken
     )
     {
         var interpreted = input.Interpreted;
+        var outcome = interpreted.Packet;
+        byte[]? raw = outcome switch
+        {
+            PacketOutcome.Decoded decoded => [.. decoded.Raw],
+            PacketOutcome.Malformed malformed => [.. malformed.Raw],
+            _ => null,
+        };
+        var identity = raw is null ? null : ReceptionIdentity.Create(interpreted.Report, raw);
+        if (identity is not null)
+        {
+            var existing = await database.MeshPacketReceptions.SingleOrDefaultAsync(
+                item => item.ReceptionIdentity == identity,
+                cancellationToken
+            );
+            if (existing is not null)
+            {
+                return new IngestReportResult(existing, IsDuplicate: true);
+            }
+        }
         var region = await database.Regions.SingleOrDefaultAsync(
             item => item.Code == interpreted.Input.Context.Region,
             cancellationToken
         );
         if (region is null)
         {
-            return Either<IngestReportError, MeshPacketReception>.Left(
+            return Either<IngestReportError, IngestReportResult>.Left(
                 IngestReportError.UnknownRegion
             );
         }
@@ -63,13 +82,6 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
             ModifiedAt = now,
         };
 
-        var outcome = interpreted.Packet;
-        byte[]? raw = outcome switch
-        {
-            PacketOutcome.Decoded decoded => decoded.Raw.ToArray(),
-            PacketOutcome.Malformed malformed => malformed.Raw.ToArray(),
-            _ => null,
-        };
         MeshPacket? packet = null;
         var decodeError = outcome switch
         {
@@ -157,6 +169,12 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
                 Rssi = interpreted.Report.Rssi,
                 Snr = interpreted.Report.Snr,
             },
+            ReportTimestamp = new ReceptionReportTimestamp
+            {
+                Status = interpreted.Report.Timestamp.Status,
+                Claim = interpreted.Report.Timestamp.Claim,
+            },
+            ReceptionIdentity = identity,
             RawPacket = raw,
             DecodeError = decodeError,
             Association = PacketAssociation.PublisherAssertedRx,
@@ -174,11 +192,11 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
         try
         {
             await database.SaveChangesAsync(cancellationToken);
-            return reception;
+            return new IngestReportResult(reception, IsDuplicate: false);
         }
         catch (DbUpdateException exception) when (IsConcurrentCreation(exception))
         {
-            return Either<IngestReportError, MeshPacketReception>.Left(
+            return Either<IngestReportError, IngestReportResult>.Left(
                 IngestReportError.ConcurrentCreation
             );
         }
@@ -222,6 +240,8 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
                 ("brokers", "ux_brokers_endpoint")
                 or
                 ("packets", "ux_packets_hash")
+                or
+                ("packet_receptions", "ux_receptions_identity")
                 or
                 ("packet_contents", "IX_packet_contents_Type_PayloadVersion_PayloadHash");
 }

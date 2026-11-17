@@ -104,6 +104,12 @@ unknown content remains opaque. Verified ADVERTs upsert
 nodes by public key with strictly newer signed timestamps; duplicates/equal timestamps
 do not churn metadata. See the persistence README for omission/reset and clock rules.
 Original reports remain in queue archives. No domain events are notified to GraphQL.
+Observer identity is taken only from the MQTT topic; JSON `origin_id` is ignored.
+Receptions deduplicate by observer, raw bytes, reported timestamp, RSSI and SNR;
+duplicate deliveries log their existing reception ID and incoming transport context
+without scheduling content processing again. Region IDs are operator-defined,
+subject only to MQTT topic-segment limits at ingress. See the persistence README
+for timestamp precision and historical-row limitations.
 GroupText uses configured channel keys; exactly one successful channel decode is
 required. Unknown, malformed and ambiguous matches stay opaque. Chat messages
 deduplicate by channel, message timestamp and exact decoded text, excluding the

@@ -340,7 +340,7 @@ namespace Pulsas.Persistence.Migrations
                 {
                     t.HasCheckConstraint(
                         "ck_mesh_node_region_hearing_region_code",
-                        "\"RegionCode\" ~ '^[A-Z]{3,4}$'"
+                        "length(\"RegionCode\") > 0"
                     );
                 });
             });
@@ -731,7 +731,27 @@ namespace Pulsas.Persistence.Migrations
 
                 b.Property<byte[]>("RawPacket").HasColumnType("bytea");
 
+                b.Property<byte[]>("ReceptionIdentity").HasColumnType("bytea");
+
                 b.Property<string>("RegionCode").IsRequired().HasColumnType("text");
+
+                b.ComplexProperty(
+                    typeof(Dictionary<string, object>),
+                    "ReportTimestamp",
+                    "Pulsas.Persistence.Receptions.MeshPacketReception.ReportTimestamp#ReceptionReportTimestamp",
+                    b1 =>
+                    {
+                        b1.IsRequired();
+
+                        b1.Property<string>("Claim")
+                            .HasColumnType("text")
+                            .HasColumnName("ReportTimestampClaim");
+
+                        b1.Property<int?>("Status")
+                            .HasColumnType("integer")
+                            .HasColumnName("ReportTimestampStatus");
+                    }
+                );
 
                 b.ComplexProperty(
                     typeof(Dictionary<string, object>),
@@ -753,6 +773,11 @@ namespace Pulsas.Persistence.Migrations
 
                 b.HasIndex("BrokerId");
 
+                b.HasIndex("ReceptionIdentity")
+                    .IsUnique()
+                    .HasDatabaseName("ux_receptions_identity")
+                    .HasFilter("\"ReceptionIdentity\" IS NOT NULL");
+
                 b.HasIndex("RegionCode");
 
                 b.HasIndex("ArrivedAt", "Id");
@@ -764,9 +789,11 @@ namespace Pulsas.Persistence.Migrations
                 b.ToTable("packet_receptions", null, t =>
                 {
                     t.HasCheckConstraint(
-                        "ck_reception_region_code",
-                        "\"RegionCode\" ~ '^[A-Z]{3,4}$'"
+                        "ck_reception_identity",
+                        "octet_length(\"ReceptionIdentity\") = 32"
                     );
+
+                    t.HasCheckConstraint("ck_reception_region_code", "length(\"RegionCode\") > 0");
                 });
             });
 
@@ -798,7 +825,7 @@ namespace Pulsas.Persistence.Migrations
                 {
                     t.HasCheckConstraint(
                         "ck_region_codes",
-                        "\"Code\" ~ '^[A-Z]{3,4}$' AND \"CountryCode\" ~ '^[A-Z]{2}$'"
+                        "length(\"Code\") > 0 AND \"CountryCode\" ~ '^[A-Z]{2}$'"
                     );
                 });
             });

@@ -1,4 +1,5 @@
 using NodaTime;
+using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.Persistence.Brokers;
 using Pulsas.Persistence.Observers;
 using Pulsas.Persistence.Packets;
@@ -19,6 +20,8 @@ public class MeshPacketReception
     public Instant? HeardAt { get; set; }
     public Instant ArrivedAt { get; set; }
     public ReceptionSignal Signal { get; set; } = new();
+    public ReceptionReportTimestamp ReportTimestamp { get; set; } = new();
+    public byte[]? ReceptionIdentity { get; set; }
     public byte[]? RawPacket { get; set; }
     public string? DecodeError { get; set; }
     public PacketAssociation Association { get; set; }
@@ -29,4 +32,11 @@ public record ReceptionSignal
 {
     public int? Rssi { get; init; }
     public double? Snr { get; init; }
+}
+
+// Null status identifies legacy evidence that did not capture the publisher's timestamp.
+public record ReceptionReportTimestamp
+{
+    public ReportTimestampStatus? Status { get; init; }
+    public string? Claim { get; init; }
 }

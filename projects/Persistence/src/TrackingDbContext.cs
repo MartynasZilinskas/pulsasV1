@@ -234,11 +234,30 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
 
         var reception = model.Entity<MeshPacketReception>();
         reception.ToTable("packet_receptions", table =>
-            table.HasCheckConstraint("ck_reception_region_code", "\"RegionCode\" ~ '^[A-Z]{3,4}$'")
-        );
+        {
+            table.HasCheckConstraint("ck_reception_region_code", "length(\"RegionCode\") > 0");
+            table.HasCheckConstraint(
+                "ck_reception_identity",
+                "octet_length(\"ReceptionIdentity\") = 32"
+            );
+        });
         reception.HasKey(x => x.Id);
         reception.Property(x => x.Id).ValueGeneratedNever();
         reception.Property(x => x.Association).HasColumnType("packet_association");
+        reception.ComplexProperty(
+            x => x.ReportTimestamp,
+            timestamp =>
+            {
+                timestamp.IsRequired();
+                timestamp.Property(x => x.Status).HasColumnName("ReportTimestampStatus");
+                timestamp.Property(x => x.Claim).HasColumnName("ReportTimestampClaim");
+            }
+        );
+        reception
+            .HasIndex(x => x.ReceptionIdentity)
+            .IsUnique()
+            .HasFilter("\"ReceptionIdentity\" IS NOT NULL")
+            .HasDatabaseName("ux_receptions_identity");
         reception.ComplexProperty(
             x => x.Signal,
             signal =>
@@ -321,7 +340,7 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
         hearing.ToTable("mesh_node_region_hearings", table =>
             table.HasCheckConstraint(
                 "ck_mesh_node_region_hearing_region_code",
-                "\"RegionCode\" ~ '^[A-Z]{3,4}$'"
+                "length(\"RegionCode\") > 0"
             )
         );
         hearing.HasKey(x => new { x.MeshNodeId, x.RegionCode });
@@ -472,7 +491,7 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
         region.ToTable("regions", table =>
             table.HasCheckConstraint(
                 "ck_region_codes",
-                "\"Code\" ~ '^[A-Z]{3,4}$' AND \"CountryCode\" ~ '^[A-Z]{2}$'"
+                "length(\"Code\") > 0 AND \"CountryCode\" ~ '^[A-Z]{2}$'"
             )
         );
         region.HasKey(x => x.Id);

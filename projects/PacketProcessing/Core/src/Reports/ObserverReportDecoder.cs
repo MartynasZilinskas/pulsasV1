@@ -17,7 +17,7 @@ internal static class ObserverReportDecoder
         var context = input.Context;
         if (
             string.IsNullOrWhiteSpace(context.Source)
-            || string.IsNullOrWhiteSpace(context.Region)
+            || string.IsNullOrEmpty(context.Region)
             || !IsPublicKey(context.ExpectedObserver)
         )
         {
@@ -32,21 +32,6 @@ internal static class ObserverReportDecoder
             {
                 return Either<ReportError, PacketReport>.Left(ReportError.ExpectedObject);
             }
-            var observer = Text(root, "origin_id");
-            if (!IsPublicKey(observer))
-            {
-                return Either<ReportError, PacketReport>.Left(ReportError.InvalidObserver);
-            }
-            if (
-                !string.Equals(
-                    observer,
-                    context.ExpectedObserver,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                return Either<ReportError, PacketReport>.Left(ReportError.ObserverMismatch);
-            }
             if (Text(root, "type") != "PACKET" || Text(root, "direction") != "rx")
             {
                 return Either<ReportError, PacketReport>.Left(ReportError.UnsupportedReport);
@@ -60,7 +45,7 @@ internal static class ObserverReportDecoder
             }
 
             return new PacketReport(
-                observer!.ToLowerInvariant(),
+                context.ExpectedObserver.ToLowerInvariant(),
                 Timestamp(root),
                 Text(root, "raw"),
                 int.TryParse(

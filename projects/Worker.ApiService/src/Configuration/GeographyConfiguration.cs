@@ -17,7 +17,10 @@ internal static class GeographyConfiguration
         foreach (var entry in section.GetChildren())
         {
             ConfigurationValues.Members(entry, "name", "country", "center", "border_file", "zoom");
-            ValidateId(entry.Key);
+            if (string.IsNullOrEmpty(entry.Key))
+            {
+                throw new InvalidOperationException("Region identifiers must be nonempty.");
+            }
             var country = ConfigurationValues.Text(entry.GetSection("country"));
             if (country.Length != 2 || !country.All(char.IsAsciiLetterUpper))
             {
@@ -60,7 +63,7 @@ internal static class GeographyConfiguration
             ValidateId(entry.Key);
             var members = ConfigurationValues
                 .List(entry.GetSection("regions"))
-                .Select(ConfigurationValues.Text)
+                .Select(ReadRegionId)
                 .ToImmutableArray();
             if (
                 members.IsEmpty
@@ -115,8 +118,8 @@ internal static class GeographyConfiguration
                 "Default view must select exactly one region or region_group."
             );
         }
-        var id = ConfigurationValues.Text(children[0]);
         var region = children[0].Key.Equals("region", StringComparison.OrdinalIgnoreCase);
+        var id = region ? ReadRegionId(children[0]) : ConfigurationValues.Text(children[0]);
         if (region ? !regions.ContainsKey(id) : !groups.ContainsKey(id))
         {
             throw new InvalidOperationException(
@@ -124,6 +127,17 @@ internal static class GeographyConfiguration
             );
         }
         return new(region ? id : null, region ? null : id);
+    }
+
+    private static string ReadRegionId(IConfigurationSection section)
+    {
+        if (string.IsNullOrEmpty(section.Value) || section.GetChildren().Any())
+        {
+            throw new InvalidOperationException(
+                "Region identifiers must be nonempty scalar values."
+            );
+        }
+        return section.Value;
     }
 
     private static void RequireMap(IConfigurationSection section)

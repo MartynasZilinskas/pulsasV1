@@ -14,9 +14,8 @@ public record TrafficGeneratorOptions
         && uri.Scheme is "ws" or "wss"
         && string.IsNullOrEmpty(uri.UserInfo)
         && string.IsNullOrEmpty(uri.Fragment)
-        && !string.IsNullOrWhiteSpace(Region)
-        && Region == Region.Trim()
-        && !Region.Any(c => char.IsControl(c) || c is '/' or '+' or '#')
+        && !string.IsNullOrEmpty(Region)
+        && !Region.Any(c => c is '/' or '+' or '#' or '\0')
         && ObserverCount > 0
         && Rounds > 0
         && IntervalMilliseconds >= 0

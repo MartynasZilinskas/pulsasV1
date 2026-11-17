@@ -12,13 +12,15 @@ public interface IReportIngestionManager
         IPacketProcessingManager.Result Interpreted
     );
 
+    record IngestReportResult(MeshPacketReception Reception, bool IsDuplicate);
+
     enum IngestReportError
     {
         UnknownRegion,
         ConcurrentCreation,
     }
 
-    Task<Either<IngestReportError, MeshPacketReception>> IngestReportAsync(
+    Task<Either<IngestReportError, IngestReportResult>> IngestReportAsync(
         IngestReportInput input,
         CancellationToken cancellationToken
     );

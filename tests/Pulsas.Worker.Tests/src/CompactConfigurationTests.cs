@@ -13,11 +13,12 @@ public class CompactConfigurationTests
         "regions": {
           "east-lithuania": {"name":"Rytų Lietuva","country":"LT","center":[55.036,25.61],"border_file":"borders/east.geojson","zoom":8},
           "VNO": {"name":"Vilnius","country":"LT","center":[54.7,25.3]},
-          "standalone": {"name":"Standalone","country":"LV","center":[90,-180]}
+          "standalone": {"name":"Standalone","country":"LV","center":[90,-180]},
+          " ": {"name":"Whitespace identifier","country":"LT","center":[0,0]}
         },
         "region_groups": {
           "lithuania": {"name":"Lietuva","regions":["east-lithuania","VNO"],"center":[55.2,23.75],"zoom":6},
-          "overlap": {"name":"Overlap","regions":["east-lithuania"]}
+          "overlap": {"name":"Overlap","regions":["east-lithuania"," "]}
         }
         """;
 
@@ -48,7 +49,8 @@ public class CompactConfigurationTests
             "{" + Geography + ",\"default_view\":{\"region_group\":\"lithuania\"}}"
         );
         var snapshot = PacketConfiguration.Read(configuration);
-        Assert.Equal(3, snapshot.Regions.Count);
+        Assert.Equal(4, snapshot.Regions.Count);
+        Assert.Equal(" ", snapshot.Regions[" "].Id);
         Assert.Equal(
             new ConfiguredCenter(55.036, 25.61),
             snapshot.Regions["east-lithuania"].Center
@@ -62,6 +64,7 @@ public class CompactConfigurationTests
             group.Regions.Contains("standalone")
         );
         Assert.Null(snapshot.RegionGroups["overlap"].Center);
+        Assert.Contains(" ", snapshot.RegionGroups["overlap"].Regions);
         Assert.Equal(new ConfiguredDefaultView(null, "lithuania"), snapshot.DefaultView);
         configuration["regions:east-lithuania:name"] = "Changed";
         Assert.Equal("Rytų Lietuva", snapshot.Regions["east-lithuania"].Name);
@@ -70,9 +73,9 @@ public class CompactConfigurationTests
     [Fact]
     public void Default_may_target_region_or_be_absent()
     {
-        using var direct = Build("{" + Geography + ",\"default_view\":{\"region\":\"VNO\"}}");
+        using var direct = Build("{" + Geography + ",\"default_view\":{\"region\":\" \"}}");
         Assert.Equal(
-            new ConfiguredDefaultView("VNO", null),
+            new ConfiguredDefaultView(" ", null),
             PacketConfiguration.Read(direct).DefaultView
         );
         using var overview = Build("{" + Geography + "}");
@@ -163,7 +166,7 @@ public class CompactConfigurationTests
         var snapshot = PacketConfiguration.Read(configuration);
         Assert.Equal("#replacement", Assert.Single(snapshot.Channels).Name);
         Assert.Equal("#baltics", Assert.Single(snapshot.Scopes).Name);
-        Assert.Equal(3, snapshot.Regions.Count);
+        Assert.Equal(4, snapshot.Regions.Count);
     }
 
     [Fact]

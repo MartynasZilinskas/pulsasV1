@@ -213,10 +213,26 @@ public class PersistenceModelTests
         Assert.Contains("PacketId,ArrivedAt,Id", indexes);
         Assert.Contains("ObserverId,ArrivedAt,Id", indexes);
         Assert.Contains("ArrivedAt,Id", indexes);
+        var identity = reception
+            .GetIndexes()
+            .Single(index => index.GetDatabaseName() == "ux_receptions_identity");
+        Assert.True(identity.IsUnique);
+        Assert.Equal("\"ReceptionIdentity\" IS NOT NULL", identity.GetFilter());
+        Assert.True(
+            reception.FindProperty(nameof(MeshPacketReception.ReceptionIdentity))!.IsNullable
+        );
+        var timestamp = reception.FindComplexProperty(nameof(MeshPacketReception.ReportTimestamp))!;
+        Assert.All(timestamp.ComplexType.GetProperties(), property =>
+            Assert.True(property.IsNullable)
+        );
         var sql = db.Database.GenerateCreateScript();
         Assert.Contains("\"Rssi\" integer", sql);
         Assert.Contains("\"Snr\" double precision", sql);
         Assert.DoesNotContain("Signal_", sql);
+        Assert.Contains("length(\"Code\") > 0", sql);
+        Assert.Contains("\"CountryCode\" ~ '^[A-Z]{2}$'", sql);
+        Assert.DoesNotContain("^[A-Z]{3,4}$", sql);
+        Assert.False(db.Database.HasPendingModelChanges());
     }
 
     [Fact]

@@ -79,11 +79,31 @@ It creates logged `ingestion`, `packet_content` (with FIFO index), and
 work; drain and explicitly retire queues before attempting schema rollback.
 
 Ingestion deduplicates contents by `(Type, PayloadVersion, PayloadHash)` and packets
-by full SHA-256 of their raw bytes. Every received callback gets a stable reception
-ID retained through retries; separate reports, including byte-identical reports,
-remain separate reception evidence. Broker endpoint comes from adapter configuration;
-regions must already exist. Publisher timestamps are not radio-hearing evidence,
-so `HeardAt` stays null. Unsupported/malformed packet evidence is retained.
+by full SHA-256 of their raw bytes. Reception identity is observer public key + raw
+packet bytes + reported timestamp + RSSI + SNR, protected by a unique SHA-256 index.
+Broker, region and arrival time do not distinguish receptions. Duplicate deliveries
+log the existing reception ID, observer, incoming broker and arrival time, then
+archive without inserting another reception or enqueuing more content work.
+Creation races use delivery's existing rollback and bounded retry policy.
+
+Parsed reported timestamps use normalized UTC ticks, retaining 100 ns precision;
+invalid claims use their exact text, and missing timestamps and signal values use
+distinct null markers. Timestamp status/claim are stored separately from arrival
+and radio-hearing time; `HeardAt` stays null. Reports without raw packet bytes
+(absent/invalid hex) remain separate evidence. Malformed packets with bytes can
+deduplicate. Legacy receptions keep null identities and uncaptured timestamp status:
+they cannot safely be backfilled and are not matched by this deduplication.
+
+Observer identity comes exclusively from the MQTT topic, never payload `origin_id`.
+Broker endpoint comes from adapter configuration; regions must already exist.
+Region identifiers are nonempty, case-preserved operator-defined text without a
+prescribed format. MQTT requires a nonempty single segment without wildcard or NUL
+characters; these transport limits do not constrain stored region IDs. Country codes
+retain their separate two-uppercase-letter rule.
+
+The `ReceptionIdentityAndRegionIdentifiers` downgrade drops the newly captured
+timestamp/identity evidence and can fail if stored IDs do not satisfy the old
+uppercase-only checks; it never rewrites or deletes rows to force a downgrade.
 
 Ingestion effects, downstream enqueue and source archival use one transaction.
 Each reception with a decoded packet generates grouped content work, retaining its
