@@ -68,9 +68,46 @@ and removes its own generated entities. It does not drain or purge production qu
 The GroupText cases in the same fixture use synthetic in-memory channel
 configuration, test-owned channel rows and the real encryption codec. They exercise
 configured matching, canonical message deduplication across attempts/paths, packet
-and reception links, ambiguity/opaque handling, transaction rollback and retries.
-Catalogue lifecycle checks roll back their entire transaction so retained channel
-metadata and historical messages are preserved. Tests never read operator key files.
+and reception links, transaction rollback and retries. The reception race test seeds
+the observer, broker and packet first, synchronizes two inserts, then asserts that
+the exact `ux_receptions_identity` conflict is retried without duplicate content work.
+Tests never read operator key files.
+
+## Real Worker executable qualification
+
+`WorkerPipelineIntegrationTests` requires both `PULSAS_PGMQ_TEST_PORT` and
+`PULSAS_WORKER_MQTT_ENDPOINT`. Use only the separate disposable, loopback database
+container described below and an isolated Mosquitto WebSocket broker. It creates
+and migrates a UUID-named database, launches the built Worker executable with a
+clean environment, and enables one synthetic hashtag channel. No operator secret
+files, user-secrets settings, Aspire services or telemetry exporters are inherited.
+The database user is the synthetic `pgmq_test` role; no credentials are extracted.
+
+The real MQTT callback, durable receiver, ingestion queue and four-task content
+pool process ADVERT and encrypted GroupText reports. The cases verify Unicode and
+whitespace-only region IDs, ignored missing/malformed/mismatched `origin_id`,
+100 ns timestamp distinctions, duplicate logs, canonical chat links, queue
+archives and empty pending/quarantine queues. Worker logs must not contain raw
+packet bytes or chat text. The test terminates its own Worker, drops only its
+database and removes its ignored `.tmp/` scratch directory. This teardown does
+not qualify graceful restart recovery or production deployment.
+
+For example, with the disposable services' actual published ports:
+
+```sh
+PULSAS_PGMQ_TEST_PORT=<database-port> \
+PULSAS_WORKER_MQTT_ENDPOINT=ws://127.0.0.1:<mqtt-port>/mqtt \
+  dotnet test tests/Pulsas.Worker.Tests --no-restore \
+  --filter 'FullyQualifiedName~WorkerPipelineIntegrationTests'
+```
+
+Migration safety is also checked against pre-migration synthetic evidence: apply
+through `DurableReportQueues`, insert region/observer/broker/reception rows, run
+the production `DatabaseSetup` executable, and compare canonical JSON checksums
+of all pre-existing fields. Legacy identity/timestamp fields must remain null;
+running `DatabaseSetup` again must be a no-op. This check must not target a
+retained database. Synthetic geography rectangles can qualify the existing
+KUN/PLQ/SQQ/VNO test expectations; they are not administrative border evidence.
 
 ## PGMQ transaction and ordering spike
 

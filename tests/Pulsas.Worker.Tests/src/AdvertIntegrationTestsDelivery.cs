@@ -3,6 +3,7 @@ using System.Text.Json;
 using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -74,17 +75,21 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         }
     }
 
-    private class DeliveryDatabaseFactory : IDbContextFactory<TrackingDbContext>
+    private class DeliveryDatabaseFactory(SaveChangesInterceptor? interceptor = null)
+        : IDbContextFactory<TrackingDbContext>
     {
-        public TrackingDbContext CreateDbContext() =>
-            new(
-                TrackingDatabase
-                    .Configure(
-                        new DbContextOptionsBuilder<TrackingDbContext>(),
-                        Environment.GetEnvironmentVariable("PULSAS_GEOGRAPHY_TEST_CONNECTION")!
-                    )
-                    .Options
+        public TrackingDbContext CreateDbContext()
+        {
+            var options = TrackingDatabase.Configure(
+                new DbContextOptionsBuilder<TrackingDbContext>(),
+                Environment.GetEnvironmentVariable("PULSAS_GEOGRAPHY_TEST_CONNECTION")!
             );
+            if (interceptor is not null)
+            {
+                options.AddInterceptors(interceptor);
+            }
+            return new(options.Options);
+        }
     }
 
     private class ReportScenario : IAsyncDisposable
@@ -395,6 +400,93 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
                 Duplicates.Enqueue(fields.ToDictionary());
             }
         }
+    }
+
+    private class ReceptionCreationRace : SaveChangesInterceptor
+    {
+        private readonly TaskCompletionSource ready = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private int writers;
+        public ConcurrentQueue<string?> Constraints { get; } = new();
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (Interlocked.Increment(ref writers) == 2)
+            {
+                ready.TrySetResult();
+            }
+            await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+            return result;
+        }
+
+        public override Task SaveChangesFailedAsync(
+            DbContextErrorEventData eventData,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (eventData.Exception.InnerException is PostgresException postgres)
+            {
+                Constraints.Enqueue(postgres.ConstraintName);
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    [GeographyFact]
+    public async Task Existing_packet_reception_identity_race_retries_without_duplicate_content_work()
+    {
+        using var key = AdvertSigningKey.Generate();
+        await using var scenario = new ReportScenario(3, key);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var at = DateTimeOffset.UtcNow;
+        var raw = ObserverReports.CreateAdvert(key, 1, at);
+        await scenario.ReceiveAsync(
+            settings,
+            ObserverReports.Packet(scenario.Observer, raw, at.AddTicks(-1)),
+            at
+        );
+        Assert.True(await Process(ReportQueues.Ingestion));
+        Assert.True(await Process(ReportQueues.Content));
+        for (var index = 1; index < 3; index++)
+        {
+            await scenario.ReceiveAsync(
+                settings,
+                ObserverReports.Packet(scenario.Observer, raw, at),
+                at,
+                index
+            );
+        }
+        var race = new ReceptionCreationRace();
+        var logger = new ReceptionLogger();
+        await using var first = new DeliveryDatabaseFactory(race).CreateDbContext();
+        await using var second = new DeliveryDatabaseFactory(race).CreateDbContext();
+        Assert.All(
+            await Task.WhenAll(
+                Processor(first, logger: logger)
+                    .ProcessNextAsync(settings.IngestionQueue, timeout.Token),
+                Processor(second, logger: logger)
+                    .ProcessNextAsync(settings.IngestionQueue, timeout.Token)
+            ),
+            Assert.True
+        );
+        Assert.Equal("ux_receptions_identity", Assert.Single(race.Constraints));
+        Assert.True(await Process(ReportQueues.Ingestion, logger: logger));
+        Assert.False(await Process(ReportQueues.Ingestion));
+        await using var check = new DeliveryDatabaseFactory().CreateDbContext();
+        Assert.Equal(
+            2,
+            await check.MeshPacketReceptions.CountAsync(row => scenario.Receptions.Contains(row.Id))
+        );
+        Assert.Single(logger.Duplicates);
+        Assert.True(await Process(ReportQueues.Content));
+        Assert.False(await Process(ReportQueues.Content));
+        var queue = await QueueAsync(check);
+        Assert.Empty(await queue.ReadBatchAsync<string>(settings.QuarantineQueue));
     }
 
     [GeographyFact]
