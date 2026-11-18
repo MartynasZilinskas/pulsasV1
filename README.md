@@ -162,6 +162,17 @@ mise exec -- dotnet build Pulsas.slnx --no-restore
 mise exec -- dotnet test Pulsas.slnx --no-build --no-restore
 ```
 
+After the final edits, run Slopwatch from the repository root:
+
+```sh
+dotnet tool run slopwatch -- analyze --fail-on warning \
+  --exclude '.tmp/**,.aspire/**,.repowise/**,.serena/**,.claude/**,.codex/**,.cursor/**,.kiro/**,**/TestResults/**'
+```
+
+The pinned local tool uses `.slopwatch/baseline.json` to distinguish existing
+findings from regressions. Fix new findings rather than updating the baseline
+to pass the check.
+
 CSharpier **1.4.0** is pinned. Codec tests include independent cryptographic
 vectors and malformed-input cases. Broker integration tests are opt-in; see
 the [generator](tests/Pulsas.TrafficGenerator.Tests/README.md) and

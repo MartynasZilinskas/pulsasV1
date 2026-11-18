@@ -1,0 +1,152 @@
+{
+  "version": 2,
+  "createdAt": "2026-11-18T04:54:08.4802696+00:00",
+  "updatedAt": "2026-11-18T04:54:08.4809322+00:00",
+  "description": "Initial baseline created by 'slopwatch init' on 2026-11-18 04:54:08 UTC",
+  "entries": [
+    {
+      "hash": "f5e01b9d443a19f0",
+      "ruleId": "SW005",
+      "filePath": "Directory.Build.props",
+      "lineNumber": 11,
+      "codeSnippet": "<NoWarn>$(NoWarn);CS1591</NoWarn>",
+      "message": "Adding warnings to NoWarn: CS1591",
+      "baselinedAt": "2026-11-18T04:54:08.4808759+00:00"
+    },
+    {
+      "hash": "5e803c7167ae9661",
+      "ruleId": "SW003",
+      "filePath": "projects/Worker.ApiService/src/DummyMqttConsumer.cs",
+      "lineNumber": 129,
+      "codeSnippet": "catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-11-18T04:54:08.4809098+00:00"
+    },
+    {
+      "hash": "8e25cb90a15f260a",
+      "ruleId": "SW003",
+      "filePath": "projects/Worker.ApiService/src/Delivery/ReportQueueConsumer.cs",
+      "lineNumber": 51,
+      "codeSnippet": "catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-11-18T04:54:08.4809127+00:00"
+    },
+    {
+      "hash": "54df98c607e38d15",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LifecycleTests.cs",
+      "lineNumber": 35,
+      "codeSnippet": "Task.Delay(20, deadline.Token)",
+      "message": "Test uses Task.Delay(20) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809142+00:00"
+    },
+    {
+      "hash": "18a901fbdbc6f83b",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LifecycleTests.cs",
+      "lineNumber": 95,
+      "codeSnippet": "Task.Delay(10, timeout.Token)",
+      "message": "Test uses Task.Delay(10) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809165+00:00"
+    },
+    {
+      "hash": "a8c9095fbe487738",
+      "ruleId": "SW003",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LocalBrokerTests.cs",
+      "lineNumber": 92,
+      "codeSnippet": "catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-11-18T04:54:08.4809181+00:00"
+    },
+    {
+      "hash": "ba246cc70fa5cd96",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LocalBrokerTests.cs",
+      "lineNumber": 72,
+      "codeSnippet": "Task.Delay(10, token)",
+      "message": "Test uses Task.Delay(10) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809193+00:00"
+    },
+    {
+      "hash": "d987969306043558",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LocalBrokerTests.cs",
+      "lineNumber": 133,
+      "codeSnippet": "Task.Delay(200, token)",
+      "message": "Test uses Task.Delay(200) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809209+00:00"
+    },
+    {
+      "hash": "3741643c420e953d",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LocalBrokerTests.cs",
+      "lineNumber": 201,
+      "codeSnippet": "Task.Delay(200, token)",
+      "message": "Test uses Task.Delay(200) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809222+00:00"
+    },
+    {
+      "hash": "5de220f56c4d9dd5",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.TrafficGenerator.Tests/src/LocalBrokerTests.cs",
+      "lineNumber": 232,
+      "codeSnippet": "Task.Delay(20, token)",
+      "message": "Test uses Task.Delay(20) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809235+00:00"
+    },
+    {
+      "hash": "e77b16a76ca7b6c5",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/DummyMqttTests.cs",
+      "lineNumber": 145,
+      "codeSnippet": "Task.Delay(25, token)",
+      "message": "Test uses Task.Delay(25) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809255+00:00"
+    },
+    {
+      "hash": "18986ed083b36c7c",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/DummyMqttTests.cs",
+      "lineNumber": 174,
+      "codeSnippet": "Task.Delay(25, token)",
+      "message": "Test uses Task.Delay(25) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809266+00:00"
+    },
+    {
+      "hash": "5afad1eb22a0f48d",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/DummyMqttTests.cs",
+      "lineNumber": 196,
+      "codeSnippet": "Task.Delay(25, token)",
+      "message": "Test uses Task.Delay(25) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809277+00:00"
+    },
+    {
+      "hash": "47bee3ad1382c04a",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/GeographyIntegrationTests.cs",
+      "lineNumber": 394,
+      "codeSnippet": "Task.Delay(10, cancellationToken)",
+      "message": "Test uses Task.Delay(10) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809291+00:00"
+    },
+    {
+      "hash": "a3c4e044ea0ee165",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/WorkerPipelineIntegrationTests.cs",
+      "lineNumber": 122,
+      "codeSnippet": "Task.Delay(25, token)",
+      "message": "Test uses Task.Delay(25) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.480931+00:00"
+    },
+    {
+      "hash": "b1fbd034f3bf5b94",
+      "ruleId": "SW004",
+      "filePath": "tests/Pulsas.Worker.Tests/src/WorkerPipelineIntegrationTests.cs",
+      "lineNumber": 206,
+      "codeSnippet": "Task.Delay(25, token)",
+      "message": "Test uses Task.Delay(25) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-11-18T04:54:08.4809322+00:00"
+    }
+  ]
+}

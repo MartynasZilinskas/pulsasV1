@@ -6,6 +6,16 @@
 - Issue identifiers use `PULSAS-N`.
 - This mapping does not grant write authorization.
 
+## Slopwatch completion check
+
+- After the final edits to an implementation task and before reporting it complete,
+  run the Slopwatch command in [Check changes](README.md#check-changes) from the
+  repository root. New warnings and errors fail the check.
+- Fix task-caused findings and rerun. Report unrelated findings or a blocked
+  check without claiming it passed. Do not update the baseline to make a task pass.
+- If the tool is unavailable, follow the existing restore approval rules or
+  report the check as blocked.
+
 ## C# conventions
 
 - Prefer `using` directives and short type names over fully qualified type names.
