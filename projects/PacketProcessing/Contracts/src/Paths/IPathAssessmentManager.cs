@@ -12,8 +12,16 @@ public interface IPathAssessmentManager
 
     record AssessReceptionInput(Guid ReceptionId);
 
-    enum AssessReceptionError
+    union AssessReceptionError(
+        AssessReceptionError.MissingReceptionPacket,
+        AssessReceptionError.SaveFailed
+    )
     {
-        MissingReceptionPacket,
+        public record MissingReceptionPacket;
+
+        public record SaveFailed(Exception Cause)
+        {
+            public override string ToString() => nameof(SaveFailed);
+        }
     }
 }

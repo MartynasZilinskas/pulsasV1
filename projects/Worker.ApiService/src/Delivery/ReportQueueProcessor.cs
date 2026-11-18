@@ -270,7 +270,21 @@ public class ReportQueueProcessor(
         CancellationToken cancellationToken
     ) =>
         (await paths.AssessReceptionAsync(new(receptionId), cancellationToken)).Match<Failure?>(
-            left: error => new(error.ToString(), false),
+            left: error =>
+                error switch
+                {
+                    IPathAssessmentManager.AssessReceptionError.MissingReceptionPacket => new(
+                        "MissingReceptionPacket",
+                        false
+                    ),
+                    IPathAssessmentManager.AssessReceptionError.SaveFailed => new(
+                        "PathAssessmentSaveFailed",
+                        true
+                    ),
+                    null => throw new InvalidOperationException(
+                        "Uninitialized path assessment error."
+                    ),
+                },
             right: _ => null
         );
 

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,10 +11,12 @@ using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.PacketProcessing.Core.Composition;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Paths;
 using Pulsas.Persistence.Receptions;
 using static Pulsas.PacketProcessing.Contracts.Paths.IPathAssessmentManager;
+using static Pulsas.PacketProcessing.Contracts.Paths.IPathAssessmentManager.AssessReceptionError;
 
 namespace Pulsas.PacketProcessing.Core.Paths;
 
@@ -33,65 +36,76 @@ public class PathAssessmentManager(TrackingDbContext database, IClock clock)
                 "Path assessment requires the delivery transaction."
             );
         }
-        var alreadyAssessed = await database.ReceptionPathAssessments.AnyAsync(
-            r => r.ReceptionId == input.ReceptionId,
-            cancellationToken
-        );
         return await Option
             .Some(input)
-            .Where(_ => !alreadyAssessed)
-            .Select(pending => AssessPendingReceptionAsync(pending, cancellationToken))
-            .GetOrElse(() => Task.FromResult<Either<AssessReceptionError, Unit>>(Unit.Value));
+            .Where(async pending =>
+                !await database.ReceptionPathAssessments.AnyAsync(
+                    row => row.ReceptionId == pending.ReceptionId,
+                    cancellationToken
+                )
+            )
+            .Match(
+                none: () => Task.FromResult<Either<AssessReceptionError, Unit>>(Unit.Value),
+                some: pending => AssessPendingReceptionAsync(pending, cancellationToken)
+            );
     }
 
-    private async Task<Either<AssessReceptionError, Unit>> AssessPendingReceptionAsync(
+    private Task<Either<AssessReceptionError, Unit>> AssessPendingReceptionAsync(
         AssessReceptionInput input,
         CancellationToken cancellationToken
-    )
-    {
-        var reception = await database
-            .MeshPacketReceptions.AsNoTracking()
-            .Include(r => r.Observer)
-            .Include(r => r.Packet)
-            .SingleOrDefaultAsync(r => r.Id == input.ReceptionId, cancellationToken);
-        return await Option
-            .FromNullable(reception)
-            .SelectMany(row =>
-                Option
-                    .FromNullable(row.Packet)
-                    .Select(storedPacket =>
-                        (
-                            Reception: row,
-                            Packet: new ReceptionPacket(
-                                storedPacket.Id,
-                                storedPacket.ContentId,
-                                [.. storedPacket.RawPacket],
-                                Convert.ToHexStringLower(row.Observer.PublicKey),
-                                row.Association != PacketAssociation.Unverified
-                            )
-                        )
-                    )
-            )
-            .ToEither(AssessReceptionError.MissingReceptionPacket)
-            .Select(context =>
-                PacketCodec
-                    .Decode(context.Packet.RawPacket.AsSpan())
-                    .Select(frame =>
-                        AssessDecodedReceptionAsync(
-                            context.Reception,
-                            context.Packet,
-                            frame,
-                            cancellationToken
-                        )
-                    )
-                    .GetOrElse(_ =>
-                        throw new InvalidOperationException("Stored packet cannot be decoded.")
-                    )
-            )
-            .Sequence();
-    }
+    ) =>
+        LoadReceptionAsync(input.ReceptionId, cancellationToken)
+            .SelectMany(DecodeReception)
+            .ToEither(new AssessReceptionError(new MissingReceptionPacket()))
+            .SelectMany(decoded =>
+                AssessDecodedReceptionAsync(
+                    decoded.Reception,
+                    decoded.Packet,
+                    decoded.Frame,
+                    cancellationToken
+                )
+            );
 
-    private async Task<Unit> AssessDecodedReceptionAsync(
+    private async Task<Option<MeshPacketReception>> LoadReceptionAsync(
+        Guid receptionId,
+        CancellationToken cancellationToken
+    ) =>
+        Option.FromNullable(
+            await database
+                .MeshPacketReceptions.AsNoTracking()
+                .Include(row => row.Observer)
+                .Include(row => row.Packet)
+                .SingleOrDefaultAsync(row => row.Id == receptionId, cancellationToken)
+        );
+
+    private static Option<DecodedReception> DecodeReception(MeshPacketReception reception) =>
+        Option
+            .FromNullable(reception.Packet)
+            .Select(storedPacket => new ReceptionPacket(
+                storedPacket.Id,
+                storedPacket.ContentId,
+                [.. storedPacket.RawPacket],
+                Convert.ToHexStringLower(reception.Observer.PublicKey),
+                reception.Association != PacketAssociation.Unverified
+            ))
+            .Select(packet =>
+                PacketCodec
+                    .Decode(packet.RawPacket.AsSpan())
+                    .Select(frame => new DecodedReception(reception, packet, frame))
+                    .GetOrElse(error =>
+                        throw new InvalidOperationException(
+                            $"Stored packet cannot be decoded: {error}."
+                        )
+                    )
+            );
+
+    private record DecodedReception(
+        MeshPacketReception Reception,
+        ReceptionPacket Packet,
+        MeshCorePacket Frame
+    );
+
+    private async Task<Either<AssessReceptionError, Unit>> AssessDecodedReceptionAsync(
         MeshPacketReception reception,
         ReceptionPacket packet,
         MeshCorePacket frame,
@@ -110,7 +124,7 @@ public class PathAssessmentManager(TrackingDbContext database, IClock clock)
             ? await AssessPathAsync(packet, frame, knowledge, advertiser, cancellationToken)
             : ImmutableArray<PathHopAssessment>.Empty;
 
-        await SaveAssessmentAsync(
+        return await SaveAssessmentAsync(
             reception,
             frame,
             knowledge.AssessedAt,
@@ -118,33 +132,61 @@ public class PathAssessmentManager(TrackingDbContext database, IClock clock)
             advertiser,
             cancellationToken
         );
-        return Unit.Value;
     }
 
-    private async Task SaveAssessmentAsync(
+    private Task<Either<AssessReceptionError, Unit>> SaveAssessmentAsync(
         MeshPacketReception reception,
         MeshCorePacket frame,
         DateTimeOffset assessedAt,
         PathAssessmentResult result,
         Option<string> advertiser,
         CancellationToken cancellationToken
+    ) =>
+        PrepareObservationAsync(reception, frame, advertiser, cancellationToken)
+            .Inspect(_ =>
+                database.ReceptionPathAssessments.Add(
+                    new ReceptionPathAssessment
+                    {
+                        ReceptionId = reception.Id,
+                        AssessedAt = Instant.FromDateTimeOffset(assessedAt),
+                        PolicyVersion = PolicyVersion,
+                        AdmitsNeighbourEvidence = advertiser != Option<string>.None,
+                        Result = JsonSerializer.Serialize(result),
+                    }
+                )
+            )
+            .SelectMany(_ => PersistAssessmentAsync(cancellationToken));
+
+    private async Task<Either<AssessReceptionError, Unit>> PrepareObservationAsync(
+        MeshPacketReception reception,
+        MeshCorePacket frame,
+        Option<string> advertiser,
+        CancellationToken cancellationToken
     )
     {
-        await advertiser.Match(
-            none: () => Task.CompletedTask,
-            some: key => SaveObservationAsync(reception, frame, key, cancellationToken)
+        await advertiser
+            .Select(key => SaveObservationAsync(reception, frame, key, cancellationToken))
+            .GetOrElse(() => Task.CompletedTask);
+        return Unit.Value;
+    }
+
+    private async Task<Either<AssessReceptionError, Unit>> PersistAssessmentAsync(
+        CancellationToken cancellationToken
+    ) =>
+        (await Result.TryAsync(() => database.SaveChangesAsync(cancellationToken))).Match<
+            Either<AssessReceptionError, Unit>
+        >(
+            ok: _ => Unit.Value,
+            error: exception =>
+                exception is DbUpdateException
+                    ? Either<AssessReceptionError, Unit>.Left(new SaveFailed(exception))
+                    : RethrowSaveFailure(exception)
         );
-        database.ReceptionPathAssessments.Add(
-            new ReceptionPathAssessment
-            {
-                ReceptionId = reception.Id,
-                AssessedAt = Instant.FromDateTimeOffset(assessedAt),
-                PolicyVersion = PolicyVersion,
-                AdmitsNeighbourEvidence = advertiser != Option<string>.None,
-                Result = JsonSerializer.Serialize(result),
-            }
-        );
-        await database.SaveChangesAsync(cancellationToken);
+
+    private static Either<AssessReceptionError, Unit> RethrowSaveFailure(Exception exception)
+    {
+        ExceptionDispatchInfo.Capture(exception).Throw();
+        throw new InvalidOperationException("Unreachable.");
     }
 
     private static PathAssessmentKind GetPathKind(MeshCorePacket frame) =>
@@ -156,12 +198,29 @@ public class PathAssessmentManager(TrackingDbContext database, IClock clock)
     private static Option<PathAssessmentStatus> GetUnsupportedStatus(
         MeshCorePacket frame,
         PathAssessmentKind kind
-    ) =>
-        !frame.IsSupportedVersion ? PathAssessmentStatus.UnsupportedVersion
-        : frame.PacketType == PacketType.Trace ? PathAssessmentStatus.UnsupportedTraceAssessment
-        : !frame.IsSupportedPathWidth ? PathAssessmentStatus.UnsupportedWidth
-        : kind != PathAssessmentKind.FloodHistory ? PathAssessmentStatus.UnsupportedDirectAssessment
-        : Option<PathAssessmentStatus>.None;
+    )
+    {
+        if (!frame.IsSupportedVersion)
+        {
+            return PathAssessmentStatus.UnsupportedVersion;
+        }
+        else if (frame.PacketType == PacketType.Trace)
+        {
+            return PathAssessmentStatus.UnsupportedTraceAssessment;
+        }
+        else if (!frame.IsSupportedPathWidth)
+        {
+            return PathAssessmentStatus.UnsupportedWidth;
+        }
+        else if (kind != PathAssessmentKind.FloodHistory)
+        {
+            return PathAssessmentStatus.UnsupportedDirectAssessment;
+        }
+        else
+        {
+            return Option<PathAssessmentStatus>.None;
+        }
+    }
 
     private async Task<ImmutableArray<PathHopAssessment>> AssessPathAsync(
         ReceptionPacket packet,

@@ -29,3 +29,10 @@ coherent catalogue/evidence read, shared trie/cache rows, neighbour observations
 immutable JSONB reception snapshots. There is no additional store/repository layer.
 Worker supplies the existing context and transaction, retaining grouped ordering,
 rollback, retries and archival.
+
+Assessment saving composes optional observation preparation with snapshot staging
+and persistence. No advertiser skips only the observation. EF update failures
+return the `AssessReceptionError.SaveFailed` union case with the original cause;
+cancellation and unexpected exceptions propagate. Delivery maps save failure to a
+safe reason and retains its existing bounded retry and rollback policy, without
+logging the exception's message.

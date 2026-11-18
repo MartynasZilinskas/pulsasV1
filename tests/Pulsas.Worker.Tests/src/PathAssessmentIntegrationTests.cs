@@ -20,6 +20,7 @@ using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
+using Pulsas.Persistence.Paths;
 using Pulsas.Persistence.Regions;
 using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService.Chat;
@@ -197,7 +198,7 @@ public class PathAssessmentIntegrationTests
         Assert.True(
             result.Match(
                 left: error =>
-                    error == IPathAssessmentManager.AssessReceptionError.MissingReceptionPacket,
+                    error is IPathAssessmentManager.AssessReceptionError.MissingReceptionPacket,
                 right: _ => false
             )
         );
@@ -241,13 +242,93 @@ public class PathAssessmentIntegrationTests
         Assert.True(
             result.Match(
                 left: error =>
-                    error == IPathAssessmentManager.AssessReceptionError.MissingReceptionPacket,
+                    error is IPathAssessmentManager.AssessReceptionError.MissingReceptionPacket,
                 right: _ => false
             )
         );
         Assert.Equal(knowledgeReadsBefore, database.KnowledgeReads.Count);
         Assert.Empty(await db.ReceptionPathAssessments.ToArrayAsync(token));
         Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [PgmqFact]
+    public async Task Manager_returns_save_failure_with_original_cause()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var token = timeout.Token;
+        await using var database = await TestDatabase.CreateAsync(token);
+        var receptionId = await IngestDirectReceptionAsync(database, token);
+        var cause = new DbUpdateException("synthetic-sensitive-save-details");
+        await using var db = database.CreateDbContext(new FailAssessmentSave(cause));
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+
+        var result = await new PathAssessmentManager(db, SystemClock.Instance).AssessReceptionAsync(
+            new(receptionId),
+            token
+        );
+
+        var failure = result.Match(
+            left: error =>
+                error switch
+                {
+                    IPathAssessmentManager.AssessReceptionError.SaveFailed failed => failed,
+                    _ => throw new InvalidOperationException("Expected save failure."),
+                },
+            right: _ => throw new InvalidOperationException("Expected save failure.")
+        );
+        Assert.Same(cause, failure.Cause);
+        Assert.Equal("SaveFailed", failure.ToString());
+        Assert.Empty(await db.ReceptionPathAssessments.ToArrayAsync(token));
+    }
+
+    [PathPgmqTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manager_propagates_unexpected_save_exceptions_and_cancellation(bool cancel)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var token = timeout.Token;
+        await using var database = await TestDatabase.CreateAsync(token);
+        var receptionId = await IngestDirectReceptionAsync(database, token);
+        Exception cause = cancel
+            ? new OperationCanceledException(token)
+            : new InvalidOperationException("synthetic unexpected failure");
+        await using var db = database.CreateDbContext(new FailAssessmentSave(cause));
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+
+        var thrown = await Record.ExceptionAsync(() =>
+            new PathAssessmentManager(db, SystemClock.Instance).AssessReceptionAsync(
+                new(receptionId),
+                token
+            )
+        );
+
+        Assert.Same(cause, thrown);
+        Assert.Empty(await db.ReceptionPathAssessments.ToArrayAsync(token));
+    }
+
+    private static async Task<Guid> IngestDirectReceptionAsync(
+        TestDatabase database,
+        CancellationToken cancellationToken
+    )
+    {
+        await SeedRegionAsync(database, cancellationToken);
+        using var observer = AdvertSigningKey.Generate();
+        var receptionId = Guid.CreateVersion7();
+        await ReceiveAsync(
+            database,
+            observer,
+            PacketCodec.Encode(PacketCodec.Create(RouteType.Direct, PacketType.Request, [1])),
+            receptionId,
+            DateTimeOffset.UtcNow,
+            cancellationToken
+        );
+        await using var db = database.CreateDbContext();
+        Assert.True(
+            await CreateProcessor(database, db)
+                .ProcessNextAsync(database.Options.IngestionQueue, cancellationToken)
+        );
+        return receptionId;
     }
 
     [PgmqFact]
@@ -314,10 +395,11 @@ public class PathAssessmentIntegrationTests
             await db.SaveChangesAsync(token);
             var knowledgeReadsBefore = database.KnowledgeReads.Count;
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 new PathAssessmentManager(db, clock).AssessReceptionAsync(new(receptionId), token)
             );
 
+            Assert.Contains("InvalidPacketLength", exception.Message);
             Assert.Equal(knowledgeReadsBefore, database.KnowledgeReads.Count);
             Assert.Empty(await db.ReceptionPathAssessments.ToArrayAsync(token));
         }
@@ -1185,6 +1267,61 @@ public class PathAssessmentIntegrationTests
     }
 
     [PgmqFact]
+    public async Task Save_failure_retries_then_quarantines_with_safe_reason_and_rolls_back_effects()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var token = timeout.Token;
+        await using var database = await TestDatabase.CreateAsync(token);
+        await SeedRegionAsync(database, token);
+        using var advertiser = AdvertSigningKey.Generate();
+        using var observer = AdvertSigningKey.Generate();
+        var receptionId = Guid.CreateVersion7();
+        await ReceiveAsync(
+            database,
+            observer,
+            SignedAdvert(advertiser, DateTimeOffset.UtcNow),
+            receptionId,
+            DateTimeOffset.UtcNow,
+            token
+        );
+        var interceptor = new FailAssessmentSave(
+            new DbUpdateException("synthetic-sensitive-save-details")
+        );
+        await using var db = database.CreateDbContext(interceptor);
+        var processor = CreateProcessor(database, db);
+        Assert.True(await processor.ProcessNextAsync(database.Options.IngestionQueue, token));
+        await using var source = NpgsqlDataSource.Create(database.ConnectionString);
+
+        for (var attempt = 1; attempt <= database.Options.MaximumAttempts; attempt++)
+        {
+            Assert.True(await processor.ProcessNextAsync(database.Options.ContentQueue, token));
+            Assert.False(db.ChangeTracker.HasChanges());
+            Assert.Empty(await db.ReceptionPathAssessments.ToArrayAsync(token));
+            Assert.Empty(await db.NeighbourObservations.ToArrayAsync(token));
+            Assert.Empty(await db.MeshNodes.ToArrayAsync(token));
+            var exhausted = attempt == database.Options.MaximumAttempts;
+            Assert.Equal(
+                exhausted ? 0L : 1L,
+                await CountAsync(source, $"pgmq.q_{database.Options.ContentQueue}", token)
+            );
+            Assert.Equal(
+                exhausted ? 1L : 0L,
+                await CountAsync(source, $"pgmq.a_{database.Options.ContentQueue}", token)
+            );
+        }
+
+        var queue = new NpgmqClient(source);
+        var quarantined = await queue.ReadAsync<QuarantinedReport>(
+            database.Options.QuarantineQueue,
+            0,
+            token
+        );
+        Assert.NotNull(quarantined);
+        Assert.Equal("PathAssessmentSaveFailed", quarantined.Message!.Reason);
+        Assert.Equal(database.Options.MaximumAttempts, interceptor.Attempts);
+    }
+
+    [PgmqFact]
     public async Task Failure_after_assessment_rolls_back_snapshot_observation_and_queue_archival()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -1844,11 +1981,14 @@ public class PathAssessmentIntegrationTests
                 RetryDelaySeconds = 0,
             };
 
-        public TrackingDbContext CreateDbContext() =>
+        public TrackingDbContext CreateDbContext() => CreateDbContext([]);
+
+        public TrackingDbContext CreateDbContext(params IInterceptor[] interceptors) =>
             new(
                 TrackingDatabase
                     .Configure(new DbContextOptionsBuilder<TrackingDbContext>(), ConnectionString)
                     .AddInterceptors(KnowledgeReads)
+                    .AddInterceptors(interceptors)
                     .Options
             );
 
@@ -1924,6 +2064,29 @@ public class PathAssessmentIntegrationTests
             )
             {
                 Commands.Add(command.CommandText);
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private class FailAssessmentSave(Exception cause) : SaveChangesInterceptor
+    {
+        public int Attempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (
+                eventData
+                    .Context!.ChangeTracker.Entries<ReceptionPathAssessment>()
+                    .Any(entry => entry.State == EntityState.Added)
+            )
+            {
+                Attempts++;
+                throw cause;
             }
             return ValueTask.FromResult(result);
         }
