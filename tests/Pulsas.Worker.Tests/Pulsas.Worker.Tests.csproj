@@ -11,4 +11,11 @@
     <ProjectReference Include="../../projects/Worker.ApiService/Pulsas.Worker.ApiService.csproj" />
     <ProjectReference Include="../../projects/TrafficGenerator/Pulsas.TrafficGenerator.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None
+      Include="../fixtures/network/*.json"
+      Link="fixtures/network/%(Filename)%(Extension)"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+  </ItemGroup>
 </Project>

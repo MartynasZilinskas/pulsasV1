@@ -1,5 +1,35 @@
 # Dummy Worker tests
 
+## Broker-free path assessment
+
+`PathAssessmentIntegrationTests` submits synthetic reports to the real durable
+receiver, processes both queues, and inspects persisted reception assessments.
+It exercises the Core assessment manager using `TrackingDbContext` directly,
+including the shared delivery transaction and single-command knowledge read.
+It uses the disposable loopback PostgreSQL container below, creates UUID-named
+`path_test_*` databases, applies production migrations, and drops only those databases.
+Neither MQTT nor a running Worker executable is required. Do not set a retained
+database connection for this suite.
+
+```sh
+PULSAS_PGMQ_TEST_PORT=<disposable-database-port> dotnet test tests/Pulsas.Worker.Tests --no-restore \
+  --filter 'FullyQualifiedName~PathAssessmentIntegrationTests|FullyQualifiedName~PathAssessmentMigrationTests|FullyQualifiedName~NetworkPacketGeneratorTests'
+```
+
+The network inventories and generator are adapted from the previous repository's
+fixture-driven harness. Their signing seeds are synthetic test identities. Directed
+links, hearing-before-forwarding, deterministic virtual-time ordering, duplicate
+hearings and per-execution forwarding suppression are test ground truth, never
+preloaded resolver evidence. Only generated packet reports enter production ingestion.
+The adapter translates the fixture broker to a synthetic WebSocket endpoint without
+connecting; simulated hearing time is a report claim, separate from local arrival.
+Normal persistence still leaves `HeardAt` null. This qualifies analyzer behavior,
+not physical RF or firmware timing.
+
+`PathAssessmentMigrationTests` checks an upgrade containing pre-existing synthetic
+reception evidence by comparing canonical rows before/after migration and repeat
+application. It creates and removes only its own `path_migration_*` database.
+
 Normal solution tests validate configuration and callback acknowledgment after
 durable acceptance. The opt-in broker test exercises the production consumer,
 both subscriptions, forwarding to a test-only receiver, and shutdown.

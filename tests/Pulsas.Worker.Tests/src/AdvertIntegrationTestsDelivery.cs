@@ -14,6 +14,7 @@ using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
@@ -198,7 +199,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
                     SystemClock.Instance
                 ),
             Options.Create(settings),
-            logger ?? NullLogger<ReportQueueProcessor>.Instance
+            logger ?? NullLogger<ReportQueueProcessor>.Instance,
+            new PathAssessmentManager(database, SystemClock.Instance)
         );
 
     private async Task<bool> Process(
@@ -1086,6 +1088,26 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
             .MeshPackets.Where(row => packetIds.Contains(row.Id))
             .Select(row => row.ContentId)
             .ToListAsync();
+        await database
+            .ReceptionPathAssessments.Where(row => receptions.Contains(row.ReceptionId))
+            .ExecuteDeleteAsync();
+        await database
+            .NeighbourObservations.Where(row => receptions.Contains(row.SourceReceptionId))
+            .ExecuteDeleteAsync();
+        await database
+            .MeshPackets.Where(row => packetIds.Contains(row.Id))
+            .ExecuteUpdateAsync(setters =>
+                setters.SetProperty(row => row.LastPathStepId, (Guid?)null)
+            );
+        await database.PathHops.Where(row => packetIds.Contains(row.PacketId)).ExecuteDeleteAsync();
+        var steps = await database
+            .PathSteps.Where(row => contentIds.Contains(row.ContentId))
+            .OrderByDescending(row => row.Position)
+            .ToArrayAsync();
+        foreach (var step in steps)
+        {
+            await database.PathSteps.Where(row => row.Id == step.Id).ExecuteDeleteAsync();
+        }
         await database
             .MeshPacketReceptions.Where(row => receptions.Contains(row.Id))
             .ExecuteDeleteAsync();

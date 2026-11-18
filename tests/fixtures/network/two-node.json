@@ -1,0 +1,6 @@
+{
+  "nodes": [
+    { "id": "repeater-a", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000001", "name": "Repeater A", "role": "Repeater", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "observer-a", "delayMilliseconds": 7 }] },
+    { "id": "observer-a", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000002", "name": "Observer A", "role": "Client", "latitudeMicrodegrees": 54010000, "longitudeMicrodegrees": 24010000, "observer": { "broker": "mqtt://fixture.invalid:1883/", "region": "VNO", "countryCode": "LT", "model": "Heltec V4 OLED", "firmwareVersion": "v1.17.1.2-observer-8998409" } }
+  ]
+}

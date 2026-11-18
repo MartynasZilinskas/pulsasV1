@@ -6,6 +6,7 @@ using Npgmq;
 using Npgsql;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Paths;
 using Pulsas.PacketProcessing.Contracts.Processing;
 using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.Persistence;
@@ -27,7 +28,8 @@ public class ReportQueueProcessor(
     IAdvertNodeManager nodes,
     IGroupTextManager groupText,
     IOptions<ReportDeliveryOptions> options,
-    ILogger<ReportQueueProcessor> logger
+    ILogger<ReportQueueProcessor> logger,
+    IPathAssessmentManager paths
 ) : IReportQueueProcessor
 {
     private record Failure(string Reason, bool Retryable);
@@ -236,12 +238,21 @@ public class ReportQueueProcessor(
         {
             return new("MissingReceptionPacket", false);
         }
+        if (
+            await database.ReceptionPathAssessments.AnyAsync(
+                row => row.ReceptionId == work.ReceptionId,
+                cancellationToken
+            )
+        )
+        {
+            return null;
+        }
         if (packet.Content.PayloadVersion != 0)
         {
             // Opaque/future content is preserved; no unsupported domain effect is invented.
-            return null;
+            return await AssessPathAsync(work.ReceptionId, cancellationToken);
         }
-        return packet.Type switch
+        var failure = packet.Type switch
         {
             PacketType.GroupText => await ProcessGroupTextAsync(packet.Id, cancellationToken),
             PacketType.Advert => await ProcessAdvertAsync(
@@ -251,7 +262,17 @@ public class ReportQueueProcessor(
             ),
             _ => null,
         };
+        return failure ?? await AssessPathAsync(work.ReceptionId, cancellationToken);
     }
+
+    private async Task<Failure?> AssessPathAsync(
+        Guid receptionId,
+        CancellationToken cancellationToken
+    ) =>
+        (await paths.AssessReceptionAsync(new(receptionId), cancellationToken)).Match<Failure?>(
+            left: error => new(error.ToString(), false),
+            right: _ => null
+        );
 
     private async Task<Failure?> ProcessGroupTextAsync(
         Guid packetId,

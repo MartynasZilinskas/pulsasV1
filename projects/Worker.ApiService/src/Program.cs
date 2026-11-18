@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using Pulsas.Configuration;
+using Pulsas.PacketProcessing.Contracts.Paths;
 using Pulsas.PacketProcessing.Contracts.Processing;
+using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Ingestion;
@@ -28,6 +30,7 @@ if (builder.Environment.IsDevelopment())
     );
     builder.Services.AddSingleton<IClock>(SystemClock.Instance);
     builder.Services.AddScoped<IAdvertNodeManager, AdvertNodeManager>();
+    builder.Services.AddScoped<IPathAssessmentManager, PathAssessmentManager>();
     builder.Services.AddSingleton<IPacketProcessingManager, PacketProcessingManager>();
     builder.Services.AddSingleton<IReportReceiver, ReportReceiver>();
     builder.Services.AddScoped<IReportIngestionManager, ReportIngestionManager>();

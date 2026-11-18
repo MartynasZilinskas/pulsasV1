@@ -590,6 +590,10 @@ namespace Pulsas.Persistence.Migrations
             {
                 b.Property<Guid>("Id").HasColumnType("uuid");
 
+                b.Property<string>("CandidateCatalogueFingerprint").HasColumnType("text");
+
+                b.PrimitiveCollection<Guid[]>("CandidateNodeIds").HasColumnType("uuid[]");
+
                 b.Property<bool>("CandidatesInitialized").HasColumnType("boolean");
 
                 b.Property<Guid>("ContentId").HasColumnType("uuid");
@@ -640,6 +644,23 @@ namespace Pulsas.Persistence.Migrations
                 b.HasIndex("MeshNodeId");
 
                 b.ToTable("path_step_candidates", (string)null);
+            });
+
+            modelBuilder.Entity("Pulsas.Persistence.Paths.ReceptionPathAssessment", b =>
+            {
+                b.Property<Guid>("ReceptionId").HasColumnType("uuid");
+
+                b.Property<bool>("AdmitsNeighbourEvidence").HasColumnType("boolean");
+
+                b.Property<Instant>("AssessedAt").HasColumnType("timestamp with time zone");
+
+                b.Property<string>("PolicyVersion").IsRequired().HasColumnType("text");
+
+                b.Property<string>("Result").IsRequired().HasColumnType("jsonb");
+
+                b.HasKey("ReceptionId");
+
+                b.ToTable("reception_path_assessments", (string)null);
             });
 
             modelBuilder.Entity("Pulsas.Persistence.Paths.StoredCandidateNeighbourSupport", b =>
@@ -1048,6 +1069,15 @@ namespace Pulsas.Persistence.Migrations
                 b.HasOne("Pulsas.Persistence.Paths.PathStep", null)
                     .WithMany()
                     .HasForeignKey("PathStepId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+            modelBuilder.Entity("Pulsas.Persistence.Paths.ReceptionPathAssessment", b =>
+            {
+                b.HasOne("Pulsas.Persistence.Receptions.MeshPacketReception", null)
+                    .WithMany()
+                    .HasForeignKey("ReceptionId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
             });

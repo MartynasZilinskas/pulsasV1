@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <InternalsVisibleTo Include="Pulsas.PacketProcessing.Tests" />
     <ProjectReference Include="../Contracts/Pulsas.PacketProcessing.Contracts.csproj" />
+    <ProjectReference Include="../../Persistence/Pulsas.Persistence.csproj" />
     <ProjectReference Include="../../../libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
   </ItemGroup>
 </Project>

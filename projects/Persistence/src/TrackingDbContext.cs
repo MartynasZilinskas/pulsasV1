@@ -18,6 +18,8 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
     public DbSet<StoredPacketContent> PacketContents => Set<StoredPacketContent>();
     public DbSet<PacketContentTag> PacketContentTags => Set<PacketContentTag>();
     public DbSet<PathStep> PathSteps => Set<PathStep>();
+    public DbSet<ReceptionPathAssessment> ReceptionPathAssessments =>
+        Set<ReceptionPathAssessment>();
     public DbSet<PathStepCandidate> PathStepCandidates => Set<PathStepCandidate>();
     public DbSet<Chat.Channel> Channels => Set<Chat.Channel>();
     public DbSet<Chat.ChatMessage> ChatMessages => Set<Chat.ChatMessage>();
@@ -42,6 +44,16 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
     protected override void OnModelCreating(ModelBuilder model)
     {
         base.OnModelCreating(model);
+        var assessment = model.Entity<ReceptionPathAssessment>();
+        assessment.ToTable("reception_path_assessments");
+        assessment.HasKey(row => row.ReceptionId);
+        assessment.Property(row => row.ReceptionId).ValueGeneratedNever();
+        assessment.Property(row => row.Result).HasColumnType("jsonb");
+        assessment
+            .HasOne<MeshPacketReception>()
+            .WithMany()
+            .HasForeignKey(row => row.ReceptionId)
+            .OnDelete(DeleteBehavior.Restrict);
         var packet = model.Entity<MeshPacket>();
         packet.ToTable("packets", table =>
         {

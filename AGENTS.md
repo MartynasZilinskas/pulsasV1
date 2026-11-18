@@ -45,9 +45,20 @@
 - Use descriptive operation and contract names, such as `ProcessAdvertAsync`,
   `ProcessAdvertInput`, and `ProcessAdvertError`. Keep operation contracts in
   their owning interface; use `using static` for readable short contract names.
-- Compose pure steps with existing Funcky operators; prefer expression bodies
-  where clearer. Keep side effects, resource lifetimes, and cancellation explicit;
-  avoid wrappers added merely for syntax.
+- Prefer composing internal `Option`/`Either` flows with existing Funcky operators
+  such as `Select`, `SelectMany`, and `Where`; prefer expression bodies where
+  clearer. Preserve these types through business logic and internal helpers;
+  do not unwrap or convert them merely to continue processing. Convert only at
+  the specific external-library, representation, or persistence interface whose
+  contract requires another form, keeping the conversion local to that boundary.
+  A layer is not a blanket exception. Use `Match` for genuine terminal branching
+  or consumption, not as an extraction step before continuing a pipeline. Nested
+  `Match` is a cue to review composition, not automatically a defect. Use
+  `RightOrNone` only when the contract intentionally needs presence/absence rather
+  than error details; preserve meaningful errors and propagate cancellation.
+  Keep side effects and resource lifetimes explicit; use imperative code where
+  clearer. Do not force every operation into a pipeline or add wrappers merely
+  for syntax.
 - Managers make one attempt and report known failures. The delivery layer owns
   bounded retries, dismissal, and logging. Persistence classifies exact provider
   errors; unexpected exceptions and cancellation propagate.

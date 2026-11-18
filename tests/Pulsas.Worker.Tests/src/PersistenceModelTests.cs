@@ -11,6 +11,7 @@ using Pulsas.Persistence;
 using Pulsas.Persistence.Chat;
 using Pulsas.Persistence.Nodes;
 using Pulsas.Persistence.Packets;
+using Pulsas.Persistence.Paths;
 using Pulsas.Persistence.Receptions;
 using Pulsas.Persistence.Scopes;
 using Xunit;
@@ -20,6 +21,34 @@ namespace Pulsas.Worker.Tests;
 // No server is opened: exercise the real configured PostgreSQL provider/model.
 public class PersistenceModelTests
 {
+    [Fact]
+    public void Reception_assessment_is_owned_by_reception_and_snapshot_is_not_a_mutable_candidate_join()
+    {
+        using var db = CreateContext();
+        var assessment = db.Model.FindEntityType(typeof(ReceptionPathAssessment))!;
+        Assert.Equal(
+            nameof(ReceptionPathAssessment.ReceptionId),
+            Assert.Single(assessment.FindPrimaryKey()!.Properties).Name
+        );
+        Assert.Equal(
+            ValueGenerated.Never,
+            assessment.FindProperty(nameof(ReceptionPathAssessment.ReceptionId))!.ValueGenerated
+        );
+        Assert.Equal(
+            "jsonb",
+            assessment.FindProperty(nameof(ReceptionPathAssessment.Result))!.GetColumnType()
+        );
+        var ownership = Assert.Single(assessment.GetForeignKeys());
+        Assert.Equal(typeof(MeshPacketReception), ownership.PrincipalEntityType.ClrType);
+        Assert.Equal(DeleteBehavior.Restrict, ownership.DeleteBehavior);
+        Assert.Equal(
+            "uuid[]",
+            db.Model.FindEntityType(typeof(PathStep))!
+                .FindProperty(nameof(PathStep.CandidateNodeIds))!
+                .GetColumnType()
+        );
+    }
+
     [Fact]
     public void Entity_ids_are_required_and_are_not_generated_by_EF()
     {

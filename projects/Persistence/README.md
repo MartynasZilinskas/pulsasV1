@@ -64,7 +64,8 @@ update metadata; equal timestamps keep the first accepted values.
 - Existing IDs, creation times and source classifications survive updates. New
   identities use `ObservedAdvert`. Packet references and radio-hearing timestamps
   are not invented: ingestion stores real packet/content/reception evidence,
-  but node latest-packet/hearing links and path assessment are not implemented.
+  but node latest-packet/hearing links are not invented. Reception path assessment
+  runs during content delivery as described below.
 
 The manager receives a scoped context and makes one attempt. Content delivery owns
 its transaction, so node effects and queue archival commit or roll back together.
@@ -79,7 +80,8 @@ It creates logged `ingestion`, `packet_content` (with FIFO index), and
 work; drain and explicitly retire queues before attempting schema rollback.
 
 Ingestion deduplicates contents by `(Type, PayloadVersion, PayloadHash)` and packets
-by full SHA-256 of their raw bytes. Reception identity is observer public key + raw
+by full SHA-256 of their raw bytes, verifying actual bytes before reusing either
+digest match. Reception identity is observer public key + raw
 packet bytes + reported timestamp + RSSI + SNR, protected by a unique SHA-256 index.
 Broker, region and arrival time do not distinguish receptions. Duplicate deliveries
 log the existing reception ID, observer, incoming broker and arrival time, then
@@ -110,6 +112,71 @@ Each reception with a decoded packet generates grouped content work, retaining i
 own original arrival time for ADVERT skew policy. A post-claim savepoint rolls back
 failed effects while preserving the queue attempt count; terminal/exhausted messages
 are archived and quarantined atomically. Cancellation rolls back and propagates.
+
+## Reception path assessment
+
+`IPathAssessmentManager` runs after successful content effects and before archival,
+on the same context and transaction. A completed assessment also guards against
+repeating content effects for redelivered content work. No separate transaction,
+global writer lock, historical refresh, or background inference engine is added.
+
+Assessment interfaces and immutable input/output records live in
+`PacketProcessing/Contracts/Paths`; the business implementation lives in
+`PacketProcessing/Core/Paths/PathAssessmentManager`. The manager uses
+`TrackingDbContext` directly through EF Core, without another store/repository layer.
+EF queries, trie/cache updates, evidence deduplication and snapshot serialization
+use the delivery context. The Core manager owns matching, cache validity, evidence
+eligibility, confidence, reasons, selection and assessment status.
+
+Ordinary flood histories share trie steps by content, parent, exact width and prefix.
+Steps cache complete matching repeater IDs against a fingerprint of the captured
+eligible catalogue; a changed catalogue invalidates matching for subsequent work.
+Confidence and observer-context decisions are never cached on these shared steps.
+Widths 1–3, leading zeros, repetitions, and separate ancestry remain distinct.
+
+Policy `neighbours-reception-v1` uses Weak prefix matches. One qualifying directed
+neighbour observation makes a candidate Strong with `NeighbourSupport`; exactly
+one Strong candidate is selected, retaining alternatives. A sole Weak candidate is
+unresolved; multiple Strong candidates remain ambiguous. Anchors are the original
+catalogue-singleton adjacent positions, verified advertiser boundary, and exact
+receiving observer at a flood terminal. Selected candidates never become anchors.
+Missing links are neutral. Coordinates, region, distance and expiry do not gate support.
+An unverified observer/packet association supplies neither a boundary anchor nor
+new neighbour evidence.
+
+Only signature-verified flood ADVERTs admit source-backed neighbour observations:
+advertiser to observer for an empty history, otherwise advertiser to a currently
+unique first-forwarder prefix. Prefix-derived endpoints are revalidated against
+the captured catalogue before use, not frozen as permanent full-key facts. An
+ambiguous prefix can be retained as source evidence without qualifying a link.
+Repeated source packet/observer pairs are not new observations; same-content sources
+cannot independently support the target. Unknown `HeardAt` remains null.
+
+Each reception gets one `reception_path_assessments` row. Its JSONB result freezes
+all candidates, outcomes, reasons, support source IDs and full-key endpoints used.
+Earlier results never read through mutable candidate membership. The policy and
+assessment time from the application clock are recorded. Catalogue and admitted
+observations are read through one EF Core LINQ query (`Concat`) in one PostgreSQL
+statement snapshot, including preceding content effects in this transaction.
+Concurrent later commits can affect a subsequent
+assessment, not this result. This is processing-time knowledge, not historical replay.
+
+Observations are admitted only by successful content processing and committed with
+their source assessment. Merely ingested or queued-ahead receptions and legacy
+observations without an admitting source assessment cannot contribute. Same-content
+FIFO remains owned by grouped delivery; different contents may process concurrently.
+
+This initial assessment policy supports flood histories only. Direct remaining routes,
+TRACE progress, future versions and reserved widths receive explicit unsupported
+assessment statuses, preserving raw bytes without inventing ordinary flood hops.
+Legacy packet-owned candidates/support tables are not the authoritative reception
+result and are not populated by this policy. No public read API or map is added.
+
+Apply migration `20261117215612_ReceptionPathAssessments` before running the updated
+Worker, through the normal database-setup resource or
+`dotnet ef database update --project projects/Persistence`.
+Existing receptions are not backfilled; new successful
+content deliveries create assessments under the recorded policy version.
 
 ## GroupText chat projection
 

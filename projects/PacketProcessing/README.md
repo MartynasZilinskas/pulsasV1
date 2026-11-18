@@ -2,9 +2,10 @@
 
 Interprets observer packet reports in memory: packet decoding, ADVERT signatures and
 application data. Retains malformed/unsupported content and partial metadata.
-Core is storage-free. Worker durably queues reports and persists interpreted evidence
-through Persistence. Worker links configured GroupText chat; path assessment and
-domain subscriptions are not wired yet.
+Core owns packet interpretation and path-assessment policy. Worker durably queues
+reports and persists interpreted evidence through EF Core. Worker links configured
+GroupText chat and invokes path assessment inside content delivery. Domain
+subscriptions are not wired yet.
 
 | Project | Responsibility |
 | --- | --- |
@@ -15,3 +16,16 @@ domain subscriptions are not wired yet.
 
 Worker hosts MQTT input, transactional ingestion and grouped ADVERT/GroupText processing;
 Gateway hosts GraphQL. Notifications for affected packets are not implemented yet.
+
+## Reception path assessment
+
+`Contracts/Paths` owns `IPathAssessmentManager` and immutable assessment records.
+`Core/Paths/PathAssessmentManager` owns prefix matching,
+catalogue-cache validity, directed neighbour support, reasons, confidence and selection,
+as well as unsupported-path and evidence-admission policy.
+
+The manager uses `Persistence/TrackingDbContext` directly through EF Core for one
+coherent catalogue/evidence read, shared trie/cache rows, neighbour observations and
+immutable JSONB reception snapshots. There is no additional store/repository layer.
+Worker supplies the existing context and transaction, retaining grouped ordering,
+rollback, retries and archival.

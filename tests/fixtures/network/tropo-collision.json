@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    { "id": "client", "name": "Client", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000003", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "local", "delayMilliseconds": 1 }] },
+    { "id": "local", "name": "Local", "role": "Repeater", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000004", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "observer", "delayMilliseconds": 1 }] },
+    { "id": "remote", "name": "Remote", "role": "Repeater", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000005", "latitudeMicrodegrees": 57000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "observer", "delayMilliseconds": 10 }] },
+    { "id": "observer", "name": "Observer", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000002", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "helper", "delayMilliseconds": 1 }], "observer": { "broker": "mqtt://fixture.invalid:1883/", "region": "VNO", "countryCode": "LT", "model": "fixture", "firmwareVersion": "fixture" } },
+    { "id": "helper", "name": "Helper", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000001", "observer": { "broker": "mqtt://fixture.invalid:1883/", "region": "VNO", "countryCode": "LT", "model": "fixture", "firmwareVersion": "fixture" } }
+  ]
+}

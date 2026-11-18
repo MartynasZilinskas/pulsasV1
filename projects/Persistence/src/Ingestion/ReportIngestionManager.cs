@@ -115,6 +115,10 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
                 };
                 database.PacketContents.Add(content);
             }
+            else if (!content.Payload.AsSpan().SequenceEqual(payload))
+            {
+                throw new InvalidOperationException("Content digest collision.");
+            }
 
             var packetHash = SHA256.HashData(raw!);
             packet = await database.MeshPackets.SingleOrDefaultAsync(
@@ -149,6 +153,10 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
             }
             else
             {
+                if (!packet.RawPacket.AsSpan().SequenceEqual(raw))
+                {
+                    throw new InvalidOperationException("Packet digest collision.");
+                }
                 packet.Content = content;
             }
         }

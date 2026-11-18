@@ -9,4 +9,8 @@ public class PathStep
     public short Width { get; set; }
     public required byte[] Prefix { get; set; }
     public bool CandidatesInitialized { get; set; }
+
+    // A catalogue fingerprint validates reusable matching only, never confidence or selection.
+    public string? CandidateCatalogueFingerprint { get; set; }
+    public Guid[]? CandidateNodeIds { get; set; }
 }

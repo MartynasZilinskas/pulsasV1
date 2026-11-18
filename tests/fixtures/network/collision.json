@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    { "id": "client", "name": "Client", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000003", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "repeater-a", "delayMilliseconds": 1 }, { "nodeId": "repeater-b", "delayMilliseconds": 2 }] },
+    { "id": "repeater-a", "name": "Repeater A", "role": "Repeater", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000004", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "observer", "delayMilliseconds": 1 }] },
+    { "id": "repeater-b", "name": "Repeater B", "role": "Repeater", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000005", "latitudeMicrodegrees": 54000000, "longitudeMicrodegrees": 24000000, "neighbours": [{ "nodeId": "observer", "delayMilliseconds": 1 }] },
+    { "id": "observer", "name": "Observer", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000002", "latitudeMicrodegrees": 54010000, "longitudeMicrodegrees": 24010000, "neighbours": [{ "nodeId": "helper", "delayMilliseconds": 1 }], "observer": { "broker": "mqtt://fixture.invalid:1883/", "region": "VNO", "countryCode": "LT", "model": "Heltec V4 OLED", "firmwareVersion": "fixture" } },
+    { "id": "helper", "name": "Helper", "role": "Client", "signingSeedHex": "0000000000000000000000000000000000000000000000000000000000000001", "observer": { "broker": "mqtt://fixture.invalid:1883/", "region": "VNO", "countryCode": "LT", "model": "Heltec V4 OLED", "firmwareVersion": "fixture" } }
+  ]
+}
