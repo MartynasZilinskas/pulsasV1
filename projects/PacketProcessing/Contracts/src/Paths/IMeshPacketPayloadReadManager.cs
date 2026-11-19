@@ -20,6 +20,10 @@ public interface IMeshPacketPayloadReadManager
         IReadOnlyList<PacketPage> pages,
         CancellationToken cancellationToken
     );
+    Task<ImmutableArray<PacketRow>> ReadPacketsByIdAsync(
+        IReadOnlyList<PacketKey> keys,
+        CancellationToken cancellationToken
+    );
     Task<ImmutableArray<ReceptionPageRow>> ReadHistoryAsync(
         IReadOnlyList<ReceptionPage> pages,
         CancellationToken cancellationToken
@@ -42,6 +46,8 @@ public interface IMeshPacketPayloadReadManager
     );
 
     public record PacketPage(Guid PayloadId, int Limit, Guid? After);
+
+    public readonly record struct PacketKey(Guid PayloadId, Guid PacketId);
 
     public record PacketPageRow(int PageIndex, PacketRow Packet);
 

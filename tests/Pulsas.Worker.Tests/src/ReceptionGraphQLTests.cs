@@ -84,6 +84,7 @@ public class ReceptionGraphQLTests
         Assert.DoesNotContain("type ServiceInfo", schema);
         Assert.Contains("arrivedAt: Instant!", schema);
         Assert.Contains("heardAt: Instant", schema);
+        Assert.Contains("does not restrict values to airport codes", schema);
         Assert.DoesNotContain("sourceReceptionId", schema);
         Assert.DoesNotContain("fromKey", schema);
 
@@ -540,6 +541,11 @@ public class ReceptionGraphQLTests
 
         public Task<ImmutableArray<PacketPageRow>> ReadPacketsAsync(
             IReadOnlyList<PacketPage> pages,
+            CancellationToken cancellationToken
+        ) => throw new NotSupportedException();
+
+        public Task<ImmutableArray<PacketRow>> ReadPacketsByIdAsync(
+            IReadOnlyList<PacketKey> keys,
             CancellationToken cancellationToken
         ) => throw new NotSupportedException();
 

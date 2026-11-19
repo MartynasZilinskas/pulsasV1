@@ -20,6 +20,10 @@ public class MeshPacketPayload(PayloadRow row)
     public long ReceptionCount => row.ReceptionCount;
     public Instant FirstArrivedAt => row.FirstArrivedAt;
     public Instant LastArrivedAt => row.LastArrivedAt;
+
+    [GraphQLDescription(
+        "Partial payload metadata decoded without packet context. Does not include decrypted message text, chat linkage, or signature status. Null for unsupported payload versions or types."
+    )]
     public IDecodedPayload? DecodedPayload =>
         PacketPayloadProjection.ReadShared((PacketType)row.Type, row.PayloadVersion, row.Payload);
 

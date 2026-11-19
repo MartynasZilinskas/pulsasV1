@@ -22,6 +22,9 @@ internal static partial class MeshPacketNode
             : Task.FromResult<MeshPacketPayload?>(null);
 
     [Cost(MeshPacketPayload.ReadCost)]
+    [GraphQLDescription(
+        "Receptions of this exact wire packet, newest server arrival first. First defaults to 20 (range 1–100); after is scoped to this packet's reception history."
+    )]
     [ListSize(
         AssumedSize = 100,
         SlicingArguments = ["first"],

@@ -173,6 +173,92 @@ public partial class PathAssessmentIntegrationTests
         );
         Assert.Equal(commonId, RepresentativeId(updated));
         Assert.Equal(commonId, RepresentativeId(group));
+        const string selectedPacket = """
+            query ($id: ID!, $packetId: ID!, $first: Int!) {
+              meshPacketPayloadById(id: $id) {
+                firstPacket { id }
+                packet(id: $packetId) {
+                  __typename id receptionCount pathHops { prefix }
+                  receptions(first: $first) { edges { node { id packetId } } }
+                }
+              }
+            }
+            """;
+        var selected = (
+            await ReadAsync(
+                selectedPacket,
+                new
+                {
+                    id = groupId,
+                    packetId = otherId,
+                    first = 10,
+                }
+            )
+        ).GetProperty("meshPacketPayloadById");
+        Assert.Equal(commonId, RepresentativeId(selected));
+        var selectedNode = selected.GetProperty("packet");
+        Assert.Equal("MeshPacket", selectedNode.GetProperty("__typename").GetString());
+        Assert.Equal(otherId, selectedNode.GetProperty("id").GetGuid());
+        Assert.Equal(1, selectedNode.GetProperty("receptionCount").GetInt64());
+        Assert.Equal(
+            third,
+            SingleNode(selectedNode.GetProperty("receptions")).GetProperty("id").GetGuid()
+        );
+        var unknown = (
+            await ReadAsync(
+                selectedPacket,
+                new
+                {
+                    id = groupId,
+                    packetId = Guid.NewGuid(),
+                    first = 1,
+                }
+            )
+        ).GetProperty("meshPacketPayloadById").GetProperty("packet");
+        Assert.Equal(JsonValueKind.Null, unknown.ValueKind);
+        var invalid = await PostAsync(
+            selectedPacket,
+            new
+            {
+                id = groupId,
+                packetId = "invalid",
+                first = 1,
+            }
+        );
+        Assert.Equal(
+            "INVALID_INPUT",
+            invalid
+                .GetProperty("errors")[0]
+                .GetProperty("extensions")
+                .GetProperty("code")
+                .GetString()
+        );
+
+        const string batchedSelection = """
+            query ($packetId: ID!) {
+              meshPacketPayloads(first: 2) {
+                edges { node { id packet(id: $packetId) { id } } }
+              }
+            }
+            """;
+        var selectionEdges = (await ReadAsync(batchedSelection, new { packetId = otherId }))
+            .GetProperty("meshPacketPayloads")
+            .GetProperty("edges");
+        Assert.Equal(2, selectionEdges.GetArrayLength());
+        foreach (var edge in selectionEdges.EnumerateArray())
+        {
+            var payload = edge.GetProperty("node");
+            var packet = payload.GetProperty("packet");
+            if (payload.GetProperty("id").GetGuid() == groupId)
+            {
+                Assert.Equal(otherId, packet.GetProperty("id").GetGuid());
+            }
+            else
+            {
+                Assert.Equal(JsonValueKind.Null, packet.ValueKind);
+            }
+        }
+
         const string packetStats = """
             query ($id: ID!) {
               meshPacketPayloadById(id: $id) {
@@ -349,7 +435,24 @@ public partial class PathAssessmentIntegrationTests
         );
         // Packet connection ordering is PostgreSQL UUID order, also used to break arrival ties.
         Assert.Equal(v.GetProperty("node").GetProperty("id").GetGuid(), RepresentativeId(tied));
-        await RemoveFixtureReceptionsAsync([second, third]);
+        await RemoveFixtureReceptionsAsync([third]);
+        var withoutReceptions = (
+            await ReadAsync(
+                selectedPacket,
+                new
+                {
+                    id = groupId,
+                    packetId = otherId,
+                    first = 1,
+                }
+            )
+        ).GetProperty("meshPacketPayloadById").GetProperty("packet");
+        Assert.Equal(otherId, withoutReceptions.GetProperty("id").GetGuid());
+        Assert.Equal(0, withoutReceptions.GetProperty("receptionCount").GetInt64());
+        Assert.Empty(
+            withoutReceptions.GetProperty("receptions").GetProperty("edges").EnumerateArray()
+        );
+        await RemoveFixtureReceptionsAsync([second]);
         Assert.Equal(
             JsonValueKind.Null,
             (await ReadAsync(details, new { id = groupId }))

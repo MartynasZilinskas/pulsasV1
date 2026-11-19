@@ -142,6 +142,28 @@ public class MeshPacketPayloadReadManager(IDbContextFactory<TrackingDbContext> d
         return [.. rows.Select(row => new PacketPageRow(row.PageIndex, row.ToPacket()))];
     }
 
+    public async Task<ImmutableArray<PacketRow>> ReadPacketsByIdAsync(
+        IReadOnlyList<PacketKey> keys,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db
+            .Database.SqlQueryRaw<PacketProjection>(
+                $$"""
+                SELECT {{PacketColumns}}
+                FROM unnest(@payload_ids, @packet_ids) AS requests(payload_id, packet_id)
+                JOIN packets p ON p."Id" = requests.packet_id AND p."ContentId" = requests.payload_id
+                {{PacketChatJoins}}
+                {{PacketStatsJoin}}
+                """,
+                new NpgsqlParameter("payload_ids", keys.Select(key => key.PayloadId).ToArray()),
+                new NpgsqlParameter("packet_ids", keys.Select(key => key.PacketId).ToArray())
+            )
+            .ToArrayAsync(cancellationToken);
+        return [.. rows.Select(row => row.ToPacket())];
+    }
+
     public async Task<ImmutableArray<ReceptionPageRow>> ReadHistoryAsync(
         IReadOnlyList<ReceptionPage> pages,
         CancellationToken cancellationToken
@@ -211,7 +233,7 @@ public class MeshPacketPayloadReadManager(IDbContextFactory<TrackingDbContext> d
         ];
     }
 
-    private abstract class PacketProjection
+    private class PacketProjection
     {
         public Guid PacketId { get; init; }
         public Guid ContentId { get; init; }

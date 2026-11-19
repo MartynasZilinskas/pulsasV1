@@ -8,7 +8,13 @@ namespace Pulsas.PacketProcessing.GraphQL;
 public class CursorType() : BrowserStringType("Cursor");
 
 // IATA is the legacy schema name; V1 region identifiers are arbitrary nonempty strings.
-public class RegionCodeType() : BrowserStringType("IATA");
+public class RegionCodeType : BrowserStringType
+{
+    public RegionCodeType()
+        : base("IATA") =>
+        Description =
+            "A nonempty region identifier. The legacy scalar name does not restrict values to airport codes; whitespace is preserved.";
+}
 
 public abstract class BrowserStringType(string name) : ScalarType<string, StringValueNode>(name)
 {

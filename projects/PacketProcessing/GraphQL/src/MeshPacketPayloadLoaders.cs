@@ -19,6 +19,17 @@ internal static class MeshPacketPayloadLoaders
         );
 
     [DataLoader]
+    public static async Task<Dictionary<PacketKey, MeshPacket>> GetPayloadPacketByIdAsync(
+        IReadOnlyList<PacketKey> keys,
+        IMeshPacketPayloadReadManager reads,
+        CancellationToken cancellationToken
+    ) =>
+        (await reads.ReadPacketsByIdAsync(keys, cancellationToken)).ToDictionary(
+            row => new PacketKey(row.ContentId!.Value, row.Id),
+            MeshPacket.FromStored
+        );
+
+    [DataLoader]
     public static async Task<Dictionary<Guid, PacketReceptionStats>> GetPacketStatsByIdAsync(
         IReadOnlyList<Guid> ids,
         IMeshPacketPayloadReadManager reads,

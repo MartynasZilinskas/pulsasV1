@@ -169,7 +169,10 @@ query FirstPacketHistory($id: ID!, $first: Int!, $after: Cursor) {
 Both histories return `MeshPacketReception` nodes. Use the reception `id` to
 open its stored assessment. Connections are live reads, not snapshots, and
 each cursor is scoped to its connection and parent. If `firstPacket` changes,
-restart its history without the old packet's cursor. Fetch detail and history
+restart its history without the old packet's cursor. To reopen a selected
+packet, use `packet(id: $packetId)` in place of `firstPacket` in the example,
+with `$packetId: ID!` set to a node ID from `packets`. The lookup returns `null`
+if the packet is missing or belongs to another payload. Fetch detail and history
 on demand rather than for every feed row in one operation. `MeshPacket.sharedPayload`
 links back to the shared payload; legacy `MeshPacket.payload` is unchanged. The
 shared decode excludes packet verification results and chat message links.

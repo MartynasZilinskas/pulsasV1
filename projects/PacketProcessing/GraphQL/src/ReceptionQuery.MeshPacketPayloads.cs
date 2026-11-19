@@ -8,6 +8,9 @@ namespace Pulsas.PacketProcessing.GraphQL;
 public partial class ReceptionQuery
 {
     [Cost(MeshPacketPayload.ReadCost)]
+    [GraphQLDescription(
+        "Shared encoded payloads with retained receptions, newest first arrival first. First defaults to 20 (range 1–100); after is scoped to this feed."
+    )]
     [ListSize(
         AssumedSize = 100,
         SlicingArguments = ["first"],
