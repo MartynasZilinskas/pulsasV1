@@ -7,8 +7,8 @@ deployment will use the provider's image. PGMQ transaction/ordering tests are
 opt-in. Development Worker durably queues MQTT reports, persists packet/content/reception
 evidence, and processes verified ADVERT metadata and configured GroupText chat through grouped content work. Aspire applies the persistence schema
 through the `database-setup` resource; PostGIS maintains cached node-region
-assignments. Path assessment and domain
-GraphQL queries are not wired yet.
+assignments. Grouped content work records point-in-time path assessments per
+reception. Gateway can expose those snapshots for local development.
 
 The [packet-processing project structure](projects/PacketProcessing/README.md)
 separates Contracts, Core, GraphQL, and Persistence.
@@ -30,12 +30,13 @@ certificate. Aspire **13.6.5** is pinned; no password or runtime exports are nee
 | --- | --- |
 | Aspire dashboard | https://localhost:17241 — use the private login link in the terminal |
 | Drizzle Studio | http://localhost:4983 |
-| GraphQL IDE | http://localhost:5100/graphql/ui/ |
+| GraphQL IDE (opt-in) | http://localhost:5100/graphql/ui/ |
 | MQTT WebSocket | ws://localhost:9001/mqtt |
 | Traffic status | http://localhost:5300/traffic/status |
 
-GraphQL currently exposes only `serviceInfo { name role }`. Worker's `/health`
-also checks its MQTT subscription; `/alive` remains process-only. These
+The GraphQL endpoint and IDE are disabled by default. See
+[Reception detail in GraphQL](#reception-detail-in-graphql) for the local opt-in.
+Worker's `/health` also checks its MQTT subscription; `/alive` remains process-only. These
 checks do not establish domain ingestion readiness. Services are local development
 tools, not public deployments.
 
@@ -44,6 +45,139 @@ Ctrl+C stops the stack. PostgreSQL and Drizzle data stay in
 `pulsas-v1-apphost` user-secrets store with the PostgreSQL volume: changing its
 password does not update an initialized database. Do not delete volumes to fix
 authentication. Drizzle has database write access.
+
+## Reception detail in GraphQL
+
+To enable read-only reception lookup on a trusted local development instance:
+
+```sh
+./aspire.sh run -- --Gateway:EnableReceptionReads=true
+```
+
+AppHost supplies the database connection and waits for migrations. For standalone
+development Gateway, set `Gateway__EnableReceptionReads=true` and supply a migrated
+`ConnectionStrings__pulsas` through the normal configuration path. The opt-in
+serves GraphQL reads only on loopback via JSON POST and rejects foreign host and
+browser origin headers. Use a loopback listener for standalone development; do
+not expose it via a reverse proxy. Outside Development, Gateway does not expose
+GraphQL or require a database connection.
+
+Use `/graphql/ui` or POST the following operation to `/graphql` with a reception
+UUID (not a packet UUID) as the `id` variable:
+
+```graphql
+query ReceptionDetail($id: ID!) {
+  meshPacketReceptionById(id: $id) {
+    id
+    packetId
+    arrivedAt
+    heardAt
+    pathAssessment {
+      assessedAt
+      policyVersion
+      pathKind
+      status
+      hops {
+        position
+        prefix
+        outcome
+        selectedCandidate { nodeId publicKey confidence reasons supportCount }
+        candidates(first: 8) { items { publicKey confidence } totalCount hasMore }
+      }
+    }
+  }
+}
+```
+
+An unknown UUID returns `null`; a malformed UUID returns an error. An existing
+reception without a recorded assessment (including older and pending receptions)
+returns `pathAssessment: null`. Unresolved and unsupported paths are recorded
+results, not missing assessments. Results are never recomputed on read.
+Candidate pages use `offset` in stored order, with `first` from 1 to 20; the
+selected candidate is returned independently of paging. The 4 MiB snapshot read
+limit produces an explicit `PATH_ASSESSMENT_TOO_LARGE` error, not a missing result.
+
+The legacy reception browser operations also work: `meshPacketReceptions`
+supports observer, region, packet type and arrival-time filters;
+`meshPacketReceptionHistogram` supports the same filters and a refresh cursor;
+`observers` and `regions` populate the filter selectors. Reception list and detail
+include packet/payload, observer, broker and region summaries. Broker labels omit
+URL paths and query strings. GroupText links include only the ID of a message in
+an active public channel.
+
+Browser cursors are scoped to their collection and filters and expire on Gateway
+restart. Restart pagination without a cursor after a restart. If a region code
+is too long to fit in a cursor, changing or deleting that region also invalidates
+its cursor. The histogram
+defaults to a rolling 24-hour window and has a 30-day lookback; that limit does
+not change what the reception list or detail can read. As in the legacy read
+API, a GraphQL operation can select at most four distinct root response fields,
+including fields selected through aliases or fragments.
+
+Packet and node catalogue queries, standalone broker queries, chat browsing and
+subscriptions are not part of this slice. Candidate support is summarized by
+stored reasons and counts; raw packets and support source records are not exposed.
+
+### Grouped packets
+
+Use `meshPacketReceptions` for one row per reception, or `meshPacketPayloads`
+for one row per encoded payload type, version, and byte sequence with at least
+one linked reception. The payload feed is ordered by `firstArrivedAt` descending.
+A later reception updates the counts and `lastArrivedAt` without moving the
+payload to the top; an earlier-arriving backfill can change its position. Counts
+are exact stored packets and receptions, not transmissions or distinct observers.
+Arrival times are server arrival times; the radio's `heardAt` remains nullable.
+
+```graphql
+query GroupedPackets($after: Cursor) {
+  meshPacketPayloads(first: 20, after: $after) {
+    edges {
+      node {
+        id payloadType payloadVersion firstArrivedAt lastArrivedAt
+        packetCount receptionCount
+        decodedPayload { type ... on DecodedAdvertPayload { name publicKey } }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+```
+
+`meshPacketPayloadById` exposes the merged `receptions` timeline and the exact
+wire `packets` in packet ID order. Different encoded paths are different packets;
+repeats of the exact wire bytes share a packet. `firstPacket` is the packet from
+the earliest retained reception, with ties broken by packet ID. It is the
+default packet to display, not evidence of the original transmission. Backfill or
+deletion can change the representative. A payload with no linked receptions is
+omitted from the feed and its lookup returns `null`.
+
+```graphql
+query FirstPacketHistory($id: ID!, $first: Int!, $after: Cursor) {
+  meshPacketPayloadById(id: $id) {
+    firstPacket {
+      id
+      pathHops { prefix }
+      receptions(first: $first, after: $after) {
+        edges { node { id arrivedAt heardAt rssi snr observer { id } } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+```
+
+Both histories return `MeshPacketReception` nodes. Use the reception `id` to
+open its stored assessment. Connections are live reads, not snapshots, and
+each cursor is scoped to its connection and parent. If `firstPacket` changes,
+restart its history without the old packet's cursor. Fetch detail and history
+on demand rather than for every feed row in one operation. `MeshPacket.sharedPayload`
+links back to the shared payload; legacy `MeshPacket.payload` is unchanged. The
+shared decode excludes packet verification results and chat message links.
+
+Packet statistics are exact. On the reception feed, even one requested packet
+statistic can require counting that packet's retained history. The Gateway's
+field budget limits fan-out, not the number of stored rows scanned. Prefer
+loading statistics on demand; high-volume reads have not been qualified.
 
 ## Generate observer traffic
 

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <PackageReference Include="Funcky" />
+    <PackageReference Include="NodaTime" />
     <ProjectReference Include="../../../libraries/Pulsas.MeshCore/Pulsas.MeshCore.csproj" />
   </ItemGroup>
 </Project>

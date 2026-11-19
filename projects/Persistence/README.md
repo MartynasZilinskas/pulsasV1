@@ -170,7 +170,8 @@ This initial assessment policy supports flood histories only. Direct remaining r
 TRACE progress, future versions and reserved widths receive explicit unsupported
 assessment statuses, preserving raw bytes without inventing ordinary flood hops.
 Legacy packet-owned candidates/support tables are not the authoritative reception
-result and are not populated by this policy. No public read API or map is added.
+result and are not populated by this policy. Gateway can read these snapshots via
+the opt-in local development query; there is no production read API or map.
 
 Apply migration `20261117215612_ReceptionPathAssessments` before running the updated
 Worker, through the normal database-setup resource or

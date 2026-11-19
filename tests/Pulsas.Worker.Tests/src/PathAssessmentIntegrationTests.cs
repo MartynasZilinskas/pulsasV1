@@ -1,23 +1,29 @@
 using System.Data.Common;
+using System.Net;
 using System.Text.Json;
 using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NodaTime;
+using NodaTime.Text;
 using Npgmq;
 using Npgsql;
+using Pulsas.Gateway.ApiService;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.PacketProcessing.Contracts.Paths;
 using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
+using Pulsas.Persistence.Chat;
 using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
 using Pulsas.Persistence.Paths;
@@ -31,7 +37,7 @@ using Xunit;
 
 namespace Pulsas.Worker.Tests;
 
-public class PathAssessmentIntegrationTests
+public partial class PathAssessmentIntegrationTests
 {
     [PgmqFact]
     public async Task Signed_advert_flows_through_queues_and_archives_reception_snapshot()
@@ -923,6 +929,48 @@ public class PathAssessmentIntegrationTests
         );
         var earlierJson = await ReadSnapshotTextAsync(database, earlierId, token);
 
+        await using var gateway = GatewayApplication.Build(
+            new() { EnvironmentName = "Development" },
+            builder =>
+            {
+                builder.Configuration.Sources.Clear();
+                builder.Configuration.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["Gateway:EnableReceptionReads"] = "true",
+                        ["ConnectionStrings:pulsas"] = database.ConnectionString,
+                    }
+                );
+                builder.Services.AddSingleton<IClock>(
+                    new ReceptionBrowserClock(Instant.FromDateTimeOffset(at.AddHours(2)))
+                );
+            }
+        );
+        gateway.Urls.Add("http://127.0.0.1:0");
+        await gateway.StartAsync(token);
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
+        {
+            BaseAddress = new Uri(gateway.Urls.Single()),
+        };
+        await AssertLocalGraphQLOnlyAsync(client, earlierId, token);
+        await AssertLegacyReceptionBrowserAsync(database, client, earlierId, token);
+        var firstDetail = await ReadReceptionGraphQLAsync(client, earlierId, token);
+        Assert.Equal(earlierId, firstDetail.GetProperty("id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, firstDetail.GetProperty("heardAt").ValueKind);
+        var firstAssessment = firstDetail.GetProperty("pathAssessment");
+        Assert.Equal(
+            "neighbours-reception-v1",
+            firstAssessment.GetProperty("policyVersion").GetString()
+        );
+        Assert.Equal("RESOLVED", firstAssessment.GetProperty("status").GetString());
+        var firstHop = Assert.Single(firstAssessment.GetProperty("hops").EnumerateArray());
+        var selected = firstHop.GetProperty("selectedCandidate");
+        Assert.Equal(
+            Convert.ToHexStringLower(firstForwarder.PublicKey.AsSpan()),
+            selected.GetProperty("publicKey").GetString()
+        );
+        Assert.True(selected.GetProperty("supportCount").GetInt32() > 0);
+
         await ReceiveAndProcessAsync(
             database,
             collisionObserver,
@@ -946,6 +994,685 @@ public class PathAssessmentIntegrationTests
             candidate.GetProperty("Confidence").GetString() == "Strong"
         );
         Assert.Equal(earlierJson, await ReadSnapshotTextAsync(database, earlierId, token));
+
+        var secondDetail = await ReadReceptionGraphQLAsync(client, laterId, token);
+        Assert.Equal(
+            firstDetail.GetProperty("packetId").GetGuid(),
+            secondDetail.GetProperty("packetId").GetGuid()
+        );
+        Assert.Equal(
+            "UNRESOLVED",
+            secondDetail.GetProperty("pathAssessment").GetProperty("status").GetString()
+        );
+        var after = await ReadReceptionGraphQLAsync(client, earlierId, token);
+        Assert.Equal(firstDetail.GetRawText(), after.GetRawText());
+
+        var unsupportedId = await ReceiveAndProcessAsync(
+            database,
+            finalObserver,
+            PacketCodec.Encode(
+                PacketCodec.Create(RouteType.Direct, PacketType.GroupText, [1, 2, 3])
+            ),
+            at.AddSeconds(5),
+            token
+        );
+        var unsupported = await ReadReceptionGraphQLAsync(client, unsupportedId, token);
+        Assert.Equal(
+            "UNSUPPORTED_DIRECT_ASSESSMENT",
+            unsupported.GetProperty("pathAssessment").GetProperty("status").GetString()
+        );
+
+        var pendingId = Guid.CreateVersion7();
+        await ReceiveAsync(database, finalObserver, targetRaw, pendingId, at.AddSeconds(6), token);
+        await using (var db = database.CreateDbContext())
+        {
+            Assert.True(
+                await CreateProcessor(database, db)
+                    .ProcessNextAsync(database.Options.IngestionQueue, token)
+            );
+        }
+        var pending = await ReadReceptionGraphQLAsync(client, pendingId, token);
+        Assert.Equal(pendingId, pending.GetProperty("id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, pending.GetProperty("pathAssessment").ValueKind);
+        await AssertLegacyPacketVisibilityAsync(database, client, unsupportedId, token);
+        Assert.Equal(
+            JsonValueKind.Null,
+            (await ReadReceptionGraphQLAsync(client, Guid.NewGuid(), token)).ValueKind
+        );
+        await AssertOversizedSnapshotReadAsync(database, client, pendingId, token);
+        await gateway.StopAsync(token);
+    }
+
+    private static async Task AssertLegacyReceptionBrowserAsync(
+        TestDatabase database,
+        HttpClient client,
+        Guid id,
+        CancellationToken token
+    )
+    {
+        var query = await File.ReadAllTextAsync(
+            Path.Combine(
+                AppContext.BaseDirectory,
+                "fixtures",
+                "graphql",
+                "reception-browser.graphql"
+            ),
+            token
+        );
+        var detail = (await PostAsync("ReceptionDetail", new { id })).GetProperty(
+            "meshPacketReceptionById"
+        );
+        Assert.Equal(id, detail.GetProperty("id").GetGuid());
+        Assert.Equal(
+            "synthetic.invalid",
+            detail.GetProperty("broker").GetProperty("name").GetString()
+        );
+        Assert.Equal(
+            "MeshPacket",
+            detail.GetProperty("packet").GetProperty("__typename").GetString()
+        );
+        Assert.Equal(
+            "AdvertPayload",
+            detail
+                .GetProperty("packet")
+                .GetProperty("payload")
+                .GetProperty("__typename")
+                .GetString()
+        );
+        var observerId = detail.GetProperty("observer").GetProperty("id").GetGuid();
+        var filter = new
+        {
+            observerIds = new[] { observerId },
+            regionCodes = new[] { "TST" },
+            packetTypes = new[] { "ADVERT" },
+        };
+
+        var page = (await PostAsync("ReceptionPage", new { filter })).GetProperty(
+            "meshPacketReceptions"
+        );
+        var edges = page.GetProperty("edges").EnumerateArray().ToArray();
+        Assert.Contains(edges, edge => edge.GetProperty("node").GetProperty("id").GetGuid() == id);
+        Assert.All(edges, edge =>
+            Assert.Equal(
+                observerId,
+                edge.GetProperty("node").GetProperty("observer").GetProperty("id").GetGuid()
+            )
+        );
+        var after = page.GetProperty("pageInfo").GetProperty("endCursor").GetString();
+        var exhausted = (await PostAsync("ReceptionPage", new { filter, after })).GetProperty(
+            "meshPacketReceptions"
+        );
+        Assert.Empty(exhausted.GetProperty("edges").EnumerateArray());
+        const string smallPage = """
+            query ReceptionPage($after: Cursor) {
+              meshPacketReceptions(first: 1, after: $after) {
+                edges { node { id } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            """;
+        var first = (await PostAsync("ReceptionPage", new { }, smallPage)).GetProperty(
+            "meshPacketReceptions"
+        );
+        Assert.True(first.GetProperty("pageInfo").GetProperty("hasNextPage").GetBoolean());
+        Assert.Equal(
+            id,
+            Assert
+                .Single(first.GetProperty("edges").EnumerateArray())
+                .GetProperty("node")
+                .GetProperty("id")
+                .GetGuid()
+        );
+        var nextCursor = first.GetProperty("pageInfo").GetProperty("endCursor").GetString();
+        var second = (
+            await PostAsync("ReceptionPage", new { after = nextCursor }, smallPage)
+        ).GetProperty("meshPacketReceptions");
+        Assert.NotEqual(
+            id,
+            Assert
+                .Single(second.GetProperty("edges").EnumerateArray())
+                .GetProperty("node")
+                .GetProperty("id")
+                .GetGuid()
+        );
+
+        var observers = (await PostAsync("ReceptionObservers", new { })).GetProperty("observers");
+        Assert.Contains(observers.GetProperty("edges").EnumerateArray(), edge =>
+            edge.GetProperty("node").GetProperty("id").GetGuid() == observerId
+        );
+        var regions = (await PostAsync("ReceptionRegions", new { })).GetProperty("regions");
+        Assert.Equal(
+            "TST",
+            Assert
+                .Single(regions.GetProperty("edges").EnumerateArray())
+                .GetProperty("node")
+                .GetProperty("code")
+                .GetString()
+        );
+
+        await using (var db = database.CreateDbContext())
+        {
+            db.Regions.AddRange(
+                new StoredRegion
+                {
+                    Id = Guid.NewGuid(),
+                    Code = " north ",
+                    CountryCode = "LT",
+                },
+                new StoredRegion
+                {
+                    Id = Guid.NewGuid(),
+                    Code = " west ",
+                    CountryCode = "LT",
+                }
+            );
+            await db.SaveChangesAsync(token);
+        }
+        const string regionPage = """
+            query ReceptionRegions($after: Cursor) {
+              regions(first: 1, after: $after) {
+                edges { node { code } }
+                pageInfo { endCursor }
+              }
+            }
+            """;
+        var firstRegion = await RegionPageAsync(null);
+        var anchor =
+            RegionCode(firstRegion) == "TST"
+                ? await RegionPageAsync(EndCursor(firstRegion))
+                : firstRegion;
+        var regionAfter = EndCursor(anchor);
+        var nextCode = RegionCode(await RegionPageAsync(regionAfter));
+        var anchorCode = RegionCode(anchor);
+        Assert.Contains(anchorCode, new[] { " north ", " west " });
+        Assert.NotEqual(anchorCode, nextCode);
+        await using (var db = database.CreateDbContext())
+        {
+            Assert.Equal(
+                1,
+                await db.Regions.Where(row => row.Code == anchorCode).ExecuteDeleteAsync(token)
+            );
+        }
+        Assert.Equal(nextCode, RegionCode(await RegionPageAsync(regionAfter)));
+
+        // A compressible region code can be longer than the signed cursor payload budget.
+        var longCode = new string(' ', 7_000) + "long region";
+        var longRegionId = Guid.NewGuid();
+        await using (var db = database.CreateDbContext())
+        {
+            db.Regions.Add(
+                new StoredRegion
+                {
+                    Id = longRegionId,
+                    Code = longCode,
+                    CountryCode = "LT",
+                }
+            );
+            await db.SaveChangesAsync(token);
+        }
+        const string regionCursors = "{ regions { edges { cursor node { code } } } }";
+        using (
+            var response = await client.PostAsJsonAsync(
+                "/graphql",
+                new { query = regionCursors },
+                token
+            )
+        )
+        {
+            var json = await response.Content.ReadAsStringAsync(token);
+            Assert.True(response.IsSuccessStatusCode, json);
+            using var result = JsonDocument.Parse(json);
+            Assert.False(result.RootElement.TryGetProperty("errors", out _), json);
+            var regionEdges = result
+                .RootElement.GetProperty("data")
+                .GetProperty("regions")
+                .GetProperty("edges")
+                .EnumerateArray()
+                .ToArray();
+            var index = Array.FindIndex(regionEdges, edge =>
+                edge.GetProperty("node").GetProperty("code").GetString() == longCode
+            );
+            Assert.InRange(index, 0, regionEdges.Length - 2);
+            var longCursor = regionEdges[index].GetProperty("cursor").GetString();
+            Assert.Equal(
+                regionEdges[index + 1].GetProperty("node").GetProperty("code").GetString(),
+                RegionCode(await RegionPageAsync(longCursor))
+            );
+            await using var db = database.CreateDbContext();
+            Assert.Equal(
+                1,
+                await db
+                    .Regions.Where(row => row.Id == longRegionId)
+                    .ExecuteUpdateAsync(
+                        update => update.SetProperty(row => row.Code, longCode + " changed"),
+                        token
+                    )
+            );
+            using var changedRegion = await client.PostAsJsonAsync(
+                "/graphql",
+                new { query = regionPage, variables = new { after = longCursor } },
+                token
+            );
+            using var invalid = JsonDocument.Parse(
+                await changedRegion.Content.ReadAsStringAsync(token)
+            );
+            Assert.Equal(
+                "INVALID_CURSOR",
+                invalid
+                    .RootElement.GetProperty("errors")[0]
+                    .GetProperty("extensions")
+                    .GetProperty("code")
+                    .GetString()
+            );
+        }
+
+        async Task<JsonElement> RegionPageAsync(string? after) =>
+            (await PostAsync("ReceptionRegions", new { after }, regionPage)).GetProperty("regions");
+
+        static string? EndCursor(JsonElement page) =>
+            page.GetProperty("pageInfo").GetProperty("endCursor").GetString();
+        static string? RegionCode(JsonElement page) =>
+            Assert
+                .Single(page.GetProperty("edges").EnumerateArray())
+                .GetProperty("node")
+                .GetProperty("code")
+                .GetString();
+
+        var start = InstantPattern
+            .ExtendedIso.Parse(detail.GetProperty("arrivedAt").GetString()!)
+            .Value;
+        var histogramFilter = new
+        {
+            filter.observerIds,
+            filter.regionCodes,
+            filter.packetTypes,
+            arrivedFrom = InstantPattern.ExtendedIso.Format(start),
+            arrivedTo = InstantPattern.ExtendedIso.Format(start + Duration.FromHours(1)),
+        };
+        var histogram = (
+            await PostAsync("ReceptionHistogram", new { filter = histogramFilter })
+        ).GetProperty("meshPacketReceptionHistogram");
+        Assert.True(histogram.GetProperty("isSnapshot").GetBoolean());
+        Assert.Equal(
+            1,
+            histogram
+                .GetProperty("buckets")
+                .EnumerateArray()
+                .Sum(bucket => bucket.GetProperty("count").GetInt64())
+        );
+        Assert.Equal(
+            "ADVERT",
+            Assert
+                .Single(
+                    histogram
+                        .GetProperty("buckets")
+                        .EnumerateArray()
+                        .SelectMany(bucket => bucket.GetProperty("packetTypes").EnumerateArray())
+                )
+                .GetProperty("packetType")
+                .GetString()
+        );
+        var refreshCursor = histogram.GetProperty("nextRefreshCursor").GetString();
+        Assert.NotNull(refreshCursor);
+        var refresh = (await PostAsync("ReceptionHistogram", new { refreshCursor })).GetProperty(
+            "meshPacketReceptionHistogram"
+        );
+        Assert.False(refresh.GetProperty("isSnapshot").GetBoolean());
+        Assert.Equal(
+            histogram.GetProperty("from").GetString(),
+            refresh.GetProperty("from").GetString()
+        );
+        // The legacy client sends the filter again along with the signed refresh cursor.
+        // Use 100 distinct UUIDs, 100 packet-type entries, and 1,400 escaped region bytes.
+        var largeFilter = new
+        {
+            observerIds = new[] { observerId }
+                .Concat(Enumerable.Range(0, 99).Select(_ => Guid.NewGuid()))
+                .ToArray(),
+            regionCodes = new[] { "TST", new string('北', 231) + "abcd" },
+            packetTypes = Enumerable.Repeat("ANONYMOUS_REQUEST", 99).Append("ADVERT").ToArray(),
+            arrivedFrom = InstantPattern.ExtendedIso.Format(start - Duration.Epsilon),
+            arrivedTo = InstantPattern.ExtendedIso.Format(
+                start + Duration.FromHours(1) + Duration.Epsilon
+            ),
+        };
+        Assert.Equal(1400, JsonSerializer.SerializeToUtf8Bytes(largeFilter.regionCodes).Length);
+        var histogramStart = query.IndexOf("query ReceptionHistogram(", StringComparison.Ordinal);
+        var histogramEnd = query.IndexOf("query ReceptionObservers(", StringComparison.Ordinal);
+        var histogramDocument = query[histogramStart..histogramEnd].TrimEnd();
+        var largeSnapshot = (
+            await PostAsync("ReceptionHistogram", new { filter = largeFilter }, histogramDocument)
+        ).GetProperty("meshPacketReceptionHistogram");
+        var largeCursor = largeSnapshot.GetProperty("nextRefreshCursor").GetString();
+        Assert.NotNull(largeCursor);
+        var largeRefresh = (
+            await PostAsync(
+                "ReceptionHistogram",
+                new { filter = largeFilter, refreshCursor = largeCursor },
+                histogramDocument
+            )
+        ).GetProperty("meshPacketReceptionHistogram");
+        Assert.False(largeRefresh.GetProperty("isSnapshot").GetBoolean());
+
+        var afterStoredInstant = histogramFilter with
+        {
+            arrivedFrom = InstantPattern.ExtendedIso.Format(start + Duration.Epsilon),
+        };
+        var boundary = (
+            await PostAsync("ReceptionHistogram", new { filter = afterStoredInstant })
+        ).GetProperty("meshPacketReceptionHistogram");
+        Assert.All(boundary.GetProperty("buckets").EnumerateArray(), bucket =>
+            Assert.Equal(0, bucket.GetProperty("count").GetInt64())
+        );
+
+        using var changed = await client.PostAsJsonAsync(
+            "/graphql",
+            new
+            {
+                query,
+                operationName = "ReceptionHistogram",
+                variables = new { filter = afterStoredInstant, refreshCursor },
+            },
+            token
+        );
+        using var rejected = JsonDocument.Parse(await changed.Content.ReadAsStringAsync(token));
+        Assert.Equal(
+            "INVALID_CURSOR",
+            rejected
+                .RootElement.GetProperty("errors")[0]
+                .GetProperty("extensions")
+                .GetProperty("code")
+                .GetString()
+        );
+
+        async Task<JsonElement> PostAsync(
+            string operationName,
+            object variables,
+            string? document = null
+        )
+        {
+            using var response = await client.PostAsJsonAsync(
+                "/graphql",
+                new
+                {
+                    query = document ?? query,
+                    operationName,
+                    variables,
+                },
+                token
+            );
+            var json = await response.Content.ReadAsStringAsync(token);
+            Assert.True(response.IsSuccessStatusCode, json);
+            using var result = JsonDocument.Parse(json);
+            Assert.False(result.RootElement.TryGetProperty("errors", out _), json);
+            return result.RootElement.GetProperty("data").Clone();
+        }
+    }
+
+    private class ReceptionBrowserClock(Instant now) : IClock
+    {
+        public Instant GetCurrentInstant() => now;
+    }
+
+    private static async Task AssertLegacyPacketVisibilityAsync(
+        TestDatabase database,
+        HttpClient client,
+        Guid id,
+        CancellationToken token
+    )
+    {
+        var query = await File.ReadAllTextAsync(
+            Path.Combine(
+                AppContext.BaseDirectory,
+                "fixtures",
+                "graphql",
+                "reception-browser.graphql"
+            ),
+            token
+        );
+        var messageId = Guid.NewGuid();
+        await using var db = database.CreateDbContext();
+        var reception = await db
+            .MeshPacketReceptions.Include(row => row.Broker)
+            .Include(row => row.Packet)
+            .SingleAsync(row => row.Id == id, token);
+        const string endpoint = "ws://synthetic.invalid:8080/mqtt?token=fixture-only";
+        reception.Broker.Endpoint = endpoint;
+        reception.Broker.Name = endpoint;
+        var channel = new Channel
+        {
+            Id = Guid.NewGuid(),
+            Kind = ChannelKind.Hashtag,
+            Name = "#fixture",
+            Active = true,
+            Public = true,
+        };
+        // Set up a linked message to exercise disclosure independently of the separately tested chat decoder.
+        var message = new ChatMessage
+        {
+            Id = messageId,
+            Channel = channel,
+            Text = "not exposed",
+            PayloadHash = new byte[32],
+            SentAt = SystemClock.Instance.GetCurrentInstant(),
+        };
+        reception.Packet!.ChatMessage = message;
+        await db.SaveChangesAsync(token);
+
+        var visible = await ReadAsync();
+        Assert.Equal(messageId, visible.GetGuid());
+        await AssertSharedVisibilityAsync(messageId);
+        channel.Public = false;
+        await db.SaveChangesAsync(token);
+        Assert.Equal(JsonValueKind.Null, (await ReadAsync()).ValueKind);
+        await AssertSharedVisibilityAsync(null);
+        channel.Public = true;
+        channel.Active = false;
+        await db.SaveChangesAsync(token);
+        Assert.Equal(JsonValueKind.Null, (await ReadAsync()).ValueKind);
+        await AssertSharedVisibilityAsync(null);
+
+        async Task AssertSharedVisibilityAsync(Guid? expected)
+        {
+            const string sharedQuery = """
+                query ($id: ID!) {
+                  meshPacketPayloadById(id: $id) {
+                    decodedPayload { ... on DecodedGroupTextPayload { channelHash } }
+                    firstPacket { payload { ... on GroupTextPayload { chatMessage { id } } } }
+                    packets(first: 1) {
+                      edges { node { payload { ... on GroupTextPayload { chatMessage { id } } } } }
+                    }
+                  }
+                }
+                """;
+            using var response = await client.PostAsJsonAsync(
+                "/graphql",
+                new { query = sharedQuery, variables = new { id = reception.Packet.ContentId } },
+                token
+            );
+            var json = await response.Content.ReadAsStringAsync(token);
+            using var result = JsonDocument.Parse(json);
+            Assert.False(result.RootElement.TryGetProperty("errors", out _), json);
+            Assert.DoesNotContain("not exposed", json);
+            var payload = result
+                .RootElement.GetProperty("data")
+                .GetProperty("meshPacketPayloadById");
+            var packets = new[]
+            {
+                payload.GetProperty("firstPacket"),
+                payload.GetProperty("packets").GetProperty("edges")[0].GetProperty("node"),
+            };
+            foreach (var packet in packets)
+            {
+                var chat = packet.GetProperty("payload").GetProperty("chatMessage");
+                Assert.Equal(
+                    expected,
+                    chat.ValueKind == JsonValueKind.Null
+                        ? (Guid?)null
+                        : chat.GetProperty("id").GetGuid()
+                );
+            }
+        }
+
+        async Task<JsonElement> ReadAsync()
+        {
+            using var response = await client.PostAsJsonAsync(
+                "/graphql",
+                new
+                {
+                    query,
+                    operationName = "ReceptionDetail",
+                    variables = new { id },
+                },
+                token
+            );
+            var json = await response.Content.ReadAsStringAsync(token);
+            using var result = JsonDocument.Parse(json);
+            Assert.False(result.RootElement.TryGetProperty("errors", out _), json);
+            Assert.DoesNotContain("fixture-only", json);
+            Assert.DoesNotContain("not exposed", json);
+            var row = result.RootElement.GetProperty("data").GetProperty("meshPacketReceptionById");
+            Assert.Equal(
+                "synthetic.invalid:8080",
+                row.GetProperty("broker").GetProperty("name").GetString()
+            );
+            var chat = row.GetProperty("packet").GetProperty("payload").GetProperty("chatMessage");
+            return (chat.ValueKind == JsonValueKind.Null ? chat : chat.GetProperty("id")).Clone();
+        }
+    }
+
+    private static async Task AssertLocalGraphQLOnlyAsync(
+        HttpClient client,
+        Guid id,
+        CancellationToken token
+    )
+    {
+        var lookup = new
+        {
+            query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { id } }",
+            variables = new { id },
+        };
+        using var foreignHost = new HttpRequestMessage(HttpMethod.Post, "/graphql")
+        {
+            Content = JsonContent.Create(lookup),
+        };
+        foreignHost.Headers.Host = "foreign.invalid";
+        using var foreignHostResult = await client.SendAsync(foreignHost, token);
+        Assert.Equal(HttpStatusCode.NotFound, foreignHostResult.StatusCode);
+
+        using var foreignOrigin = new HttpRequestMessage(HttpMethod.Post, "/graphql")
+        {
+            Content = JsonContent.Create(lookup),
+        };
+        foreignOrigin.Headers.Add("Origin", "http://foreign.invalid");
+        using var foreignOriginResult = await client.SendAsync(foreignOrigin, token);
+        Assert.Equal(HttpStatusCode.Forbidden, foreignOriginResult.StatusCode);
+
+        using var localOrigin = new HttpRequestMessage(HttpMethod.Post, "/graphql")
+        {
+            Content = JsonContent.Create(lookup),
+        };
+        localOrigin.Headers.Add("Origin", client.BaseAddress!.GetLeftPart(UriPartial.Authority));
+        using var localOriginResult = await client.SendAsync(localOrigin, token);
+        localOriginResult.EnsureSuccessStatusCode();
+        using var localData = JsonDocument.Parse(
+            await localOriginResult.Content.ReadAsStringAsync(token)
+        );
+        Assert.False(
+            localData.RootElement.TryGetProperty("errors", out _),
+            localData.RootElement.ToString()
+        );
+        Assert.Equal(
+            id,
+            localData
+                .RootElement.GetProperty("data")
+                .GetProperty("meshPacketReceptionById")
+                .GetProperty("id")
+                .GetGuid()
+        );
+
+        using var get = await client.GetAsync("/graphql?query=%7B__typename%7D", token);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, get.StatusCode);
+    }
+
+    private static async Task AssertOversizedSnapshotReadAsync(
+        TestDatabase database,
+        HttpClient client,
+        Guid id,
+        CancellationToken token
+    )
+    {
+        // Synthetic boundary row for the database byte limit, not a simulator assessment.
+        await using (var db = database.CreateDbContext())
+        {
+            db.ReceptionPathAssessments.Add(
+                new()
+                {
+                    ReceptionId = id,
+                    AssessedAt = SystemClock.Instance.GetCurrentInstant(),
+                    PolicyVersion = "test-size-limit",
+                    Result = "{\"padding\":\"" + new string('a', 4 * 1024 * 1024) + "\"}",
+                }
+            );
+            await db.SaveChangesAsync(token);
+        }
+
+        using var response = await client.PostAsJsonAsync(
+            "/graphql",
+            new
+            {
+                query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { id pathAssessment { status } } }",
+                variables = new { id },
+            },
+            token
+        );
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+        var result = document.RootElement;
+        var error = Assert.Single(result.GetProperty("errors").EnumerateArray());
+        Assert.Equal(
+            "PATH_ASSESSMENT_TOO_LARGE",
+            error.GetProperty("extensions").GetProperty("code").GetString()
+        );
+        var reception = result.GetProperty("data").GetProperty("meshPacketReceptionById");
+        Assert.Equal(id, reception.GetProperty("id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, reception.GetProperty("pathAssessment").ValueKind);
+    }
+
+    private static async Task<JsonElement> ReadReceptionGraphQLAsync(
+        HttpClient client,
+        Guid id,
+        CancellationToken token
+    )
+    {
+        using var response = await client.PostAsJsonAsync(
+            "/graphql",
+            new
+            {
+                query = """
+                query ($id: ID!) {
+                  meshPacketReceptionById(id: $id) {
+                    id packetId arrivedAt heardAt
+                    pathAssessment { assessedAt policyVersion status hops {
+                      prefix selectedCandidate { publicKey supportCount }
+                    } }
+                  }
+                }
+                """,
+                variables = new { id },
+            },
+            token
+        );
+        response.EnsureSuccessStatusCode();
+        using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+        Assert.False(
+            result.RootElement.TryGetProperty("errors", out _),
+            result.RootElement.ToString()
+        );
+        return result
+            .RootElement.GetProperty("data")
+            .GetProperty("meshPacketReceptionById")
+            .Clone();
     }
 
     [PathPgmqTheory]

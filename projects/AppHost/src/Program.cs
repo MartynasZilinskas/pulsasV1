@@ -46,7 +46,24 @@ var worker = builder
     .WithReference(database)
     .WaitForCompletion(databaseSetup)
     .WithHttpHealthCheck("/health");
-builder.AddProject<Projects.Pulsas_Gateway_ApiService>("gateway").WithHttpHealthCheck("/health");
+var gateway = builder
+    .AddProject<Projects.Pulsas_Gateway_ApiService>("gateway")
+    .WithHttpHealthCheck("/health");
+if (
+    builder.ExecutionContext.IsRunMode
+    && builder.Configuration.GetValue<bool>("Gateway:EnableReceptionReads")
+)
+{
+    gateway
+        .WithEndpoint("http", endpoint =>
+        {
+            endpoint.IsProxied = false;
+            endpoint.TargetHost = "localhost";
+        })
+        .WithReference(database)
+        .WaitForCompletion(databaseSetup)
+        .WithEnvironment("Gateway__EnableReceptionReads", "true");
+}
 
 if (builder.ExecutionContext.IsRunMode)
 {

@@ -11,6 +11,8 @@ public record MeshCorePacket(
     ImmutableArray<byte> Payload
 )
 {
+    public const int SupportedPayloadVersion = 0;
+
     public RouteType RouteType => (RouteType)(Header & 3);
     public PacketType PacketType => (PacketType)((Header >> 2) & 15);
     public int PayloadVersion => Header >> 6;
@@ -18,6 +20,6 @@ public record MeshCorePacket(
     public int PathCount => EncodedPathLength & 63;
     public bool HasTransportCodes =>
         RouteType is RouteType.TransportFlood or RouteType.TransportDirect;
-    public bool IsSupportedVersion => PayloadVersion == 0;
+    public bool IsSupportedVersion => PayloadVersion == SupportedPayloadVersion;
     public bool IsSupportedPathWidth => PathWidth <= 3;
 }

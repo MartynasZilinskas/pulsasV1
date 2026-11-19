@@ -8,12 +8,22 @@ It exercises the Core assessment manager using `TrackingDbContext` directly,
 including the shared delivery transaction and single-command knowledge read.
 It uses the disposable loopback PostgreSQL container below, creates UUID-named
 `path_test_*` databases, applies production migrations, and drops only those databases.
-Neither MQTT nor a running Worker executable is required. Do not set a retained
-database connection for this suite.
+Neither MQTT nor a running Worker executable is required. One case starts Gateway
+on an ephemeral loopback HTTP port and queries the same stored packet through two
+different receptions before and after evidence changes. It also runs the unchanged
+reception-browser operations copied from the old client into
+`tests/fixtures/graphql/reception-browser.graphql`. Do not set a retained database
+connection for this suite.
+
+`Shared_payloads_expose_canonical_packets_and_earliest_retained_representative`
+ingests repeat receptions and distinct wire packets through production delivery.
+It checks payload ordering, totals, representative selection (including backfill,
+ties, and removal), canonical packet and reception nodes, and scoped history
+cursors through Gateway HTTP.
 
 ```sh
 PULSAS_PGMQ_TEST_PORT=<disposable-database-port> dotnet test tests/Pulsas.Worker.Tests --no-restore \
-  --filter 'FullyQualifiedName~PathAssessmentIntegrationTests|FullyQualifiedName~PathAssessmentMigrationTests|FullyQualifiedName~NetworkPacketGeneratorTests'
+  --filter 'FullyQualifiedName~PathAssessmentIntegrationTests|FullyQualifiedName~PathAssessmentMigrationTests|FullyQualifiedName~NetworkPacketGeneratorTests|FullyQualifiedName~ReceptionGraphQLTests'
 ```
 
 The network inventories and generator are adapted from the previous repository's
@@ -29,6 +39,9 @@ not physical RF or firmware timing.
 `PathAssessmentMigrationTests` checks an upgrade containing pre-existing synthetic
 reception evidence by comparing canonical rows before/after migration and repeat
 application. It creates and removes only its own `path_migration_*` database.
+
+`ReceptionGraphQLTests` checks the local schema, ID behavior, paging, and query
+cost limits with the production GraphQL executor and no database or network.
 
 Normal solution tests validate configuration and callback acknowledgment after
 durable acceptance. The opt-in broker test exercises the production consumer,
@@ -154,7 +167,7 @@ podman build -t localhost/pulsas-pgmq-spike:pg18-pgmq1.13.1 \
 podman run -d --name pulsas-pgmq-spike --pull=never \
   -e POSTGRES_USER=pgmq_test -e POSTGRES_HOST_AUTH_METHOD=trust \
   -p 127.0.0.1::5432 \
-  --health-cmd='pg_isready -U pgmq_test -d postgres' \
+  --health-cmd='pg_isready -h 127.0.0.1 -U pgmq_test -d postgres' \
   --health-interval=1s --health-retries=30 \
   localhost/pulsas-pgmq-spike:pg18-pgmq1.13.1
 podman wait --condition=healthy pulsas-pgmq-spike

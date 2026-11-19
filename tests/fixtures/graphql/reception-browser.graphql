@@ -1,0 +1,66 @@
+fragment ReceptionFields on MeshPacketReception {
+  id
+  arrivedAt
+  heardAt
+  rssi
+  snr
+  observer { id publicKey name }
+  broker { id name }
+  region { id code name countryCode }
+  packet {
+    __typename
+    ... on PacketDecodeError { message }
+    ... on MeshPacket {
+      id shortHash packetHash routeType pathPrefixWidth
+      pathHops { prefix }
+      payload {
+        __typename
+        type
+        ... on AdvertPayload { publicKey name role advertisedTimestamp signatureStatus }
+        ... on RequestPayload { sourceHash destinationHash }
+        ... on ResponsePayload { sourceHash destinationHash }
+        ... on TextPayload { sourceHash destinationHash }
+        ... on PathPayload { sourceHash destinationHash }
+        ... on AnonymousRequestPayload { publicKey destinationHash }
+        ... on GroupTextPayload { channelHash chatMessage { id } }
+        ... on GroupDataPayload { channelHash }
+        ... on AckPayload { checksumHex }
+        ... on TracePayload { tag flags }
+        ... on MultipartPayload { remaining payloadType checksumHex }
+        ... on ControlPayload { subtype subtypeCode }
+      }
+    }
+  }
+}
+
+query ReceptionPage($after: Cursor, $filter: MeshPacketReceptionFilterInput) {
+  meshPacketReceptions(first: 20, after: $after, filter: $filter) {
+    edges { cursor node { ...ReceptionFields } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+
+query ReceptionDetail($id: ID!) {
+  meshPacketReceptionById(id: $id) { ...ReceptionFields }
+}
+
+query ReceptionHistogram($filter: MeshPacketReceptionFilterInput, $refreshCursor: Cursor) {
+  meshPacketReceptionHistogram(filter: $filter, refreshCursor: $refreshCursor) {
+    from to intervalSeconds isSnapshot nextRefreshCursor
+    buckets { from to count packetTypes { packetType count } }
+  }
+}
+
+query ReceptionObservers($after: Cursor) {
+  observers(first: 100, after: $after) {
+    edges { node { id name publicKey } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+
+query ReceptionRegions($after: Cursor) {
+  regions(first: 100, after: $after) {
+    edges { node { id code name } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
