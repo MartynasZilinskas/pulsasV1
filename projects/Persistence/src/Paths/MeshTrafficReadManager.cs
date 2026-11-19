@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using Pulsas.MeshCore.Packets;
@@ -8,7 +9,7 @@ using static Pulsas.PacketProcessing.Contracts.Paths.IMeshTrafficReadManager;
 
 namespace Pulsas.Persistence.Paths;
 
-public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFactory)
+public partial class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFactory)
     : IMeshTrafficReadManager
 {
     public async Task<Summary> ReadSummaryAsync(
@@ -17,7 +18,7 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
     )
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var receptions = FilterReceptions(db.MeshPacketReceptions, input);
+        var receptions = FilterReceptions(db.MeshPacketReceptions, input.Window);
 
         // Totals and breakdowns must see the same snapshot while ingestion continues.
         await using var transaction = await db.Database.BeginTransactionAsync(
@@ -33,8 +34,8 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
                 ContentId = (Guid?)row.Packet!.ContentId,
                 Snr = row.Signal.Snr > double.NegativeInfinity
                 && row.Signal.Snr < double.PositiveInfinity
-                    ? row.Signal.Snr
-                    : null,
+                    ? Convert.ToDecimal(row.Signal.Snr!.Value.ToString())
+                    : (decimal?)null,
                 row.Signal.Rssi,
             })
             .GroupBy(_ => 1)
@@ -54,7 +55,7 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
                 Observers = group.Select(row => row.ObserverId).Distinct().LongCount(),
                 Regions = group.Select(row => row.RegionCode).Distinct().LongCount(),
                 SnrCount = group.LongCount(row => row.Snr != null),
-                SnrAverage = group.Average(row => row.Snr),
+                SnrAverage = group.Average(row => row.Snr)!.Value.ToString(),
                 RssiCount = group.LongCount(row => row.Rssi != null),
                 RssiAverage = group.Average(row => row.Rssi),
             })
@@ -93,7 +94,7 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
             totals?.Payloads ?? 0,
             totals?.Observers ?? 0,
             totals?.Regions ?? 0,
-            new(totals?.SnrCount ?? 0, Option.FromNullable(totals?.SnrAverage)),
+            ReadSnrMean(totals?.SnrCount ?? 0, totals?.SnrAverage),
             new(totals?.RssiCount ?? 0, Option.FromNullable(totals?.RssiAverage)),
             [
                 .. packetTypeCounts.Select(row => new PacketTypeCount(
@@ -103,6 +104,30 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
             ],
             [.. tags]
         );
+    }
+
+    private static SignalSummary ReadSnrMean(long count, string? average)
+    {
+        if (count == 0)
+        {
+            return new(0, Option<double>.None);
+        }
+
+        // The SQL double -> text -> numeric cast retains round-trip digits at the extremes.
+        // Return the numeric average as text: CLR decimal cannot hold the full double range.
+        if (
+            !double.TryParse(
+                average,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var value
+            ) || !double.IsFinite(value)
+        )
+        {
+            throw new InvalidOperationException("The stored SNR mean must be finite.");
+        }
+
+        return new(count, Option.Some(value));
     }
 
     private static Task<StoredPacketTypeCount[]> ReadPacketTypeCountsAsync(
@@ -120,7 +145,7 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
 
     private static IQueryable<MeshPacketReception> FilterReceptions(
         IQueryable<MeshPacketReception> receptions,
-        SummaryInput input
+        TrafficWindow input
     )
     {
         var from = ReceptionReadManager.StoredBoundary(input.From);

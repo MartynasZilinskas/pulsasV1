@@ -476,7 +476,10 @@ public partial class PathAssessmentIntegrationTests
         return result.RootElement.Clone();
     }
 
-    private class TrafficReadInterceptor : DbCommandInterceptor
+    private class TrafficReadInterceptor(
+        Action<DbCommand>? inspect = null,
+        Action<TimeSpan>? measure = null
+    ) : DbCommandInterceptor
     {
         private int count;
         public int Count => Volatile.Read(ref count);
@@ -490,11 +493,23 @@ public partial class PathAssessmentIntegrationTests
         )
         {
             var number = Interlocked.Increment(ref count);
+            inspect?.Invoke(command);
             if (BeforeRead is { } beforeRead)
             {
                 await beforeRead(number, cancellationToken);
             }
             return result;
+        }
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            DbDataReader result,
+            CancellationToken cancellationToken = default
+        )
+        {
+            measure?.Invoke(eventData.Duration);
+            return ValueTask.FromResult(result);
         }
     }
 

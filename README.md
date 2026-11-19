@@ -138,10 +138,42 @@ configured regions. `packetTypeCounts` partitions matching receptions by stored
 packet type; the final `null` type, when present, counts receptions without a
 linked packet. Only types with matching receptions are listed. SNR and RSSI
 each report their own sample count and a mean, which is `null` without samples.
+The mean gives each valid reading equal weight; it is not an average of bucket
+means. SNR uses PostgreSQL numeric accumulation of the stored doubles' round-trip
+decimal values so the intermediate sum can exceed the double range.
 The tag list groups matching payloads and their receptions by current stored tag.
 It is empty when no tags match; groups can overlap and should not be added to
 the overall totals. History coverage is `UNKNOWN`, including for empty windows.
 Later ingestion can change a previously queried window.
+
+### Traffic and signal trends
+
+`meshTrafficTrend(from: Instant!, to: Instant!, filter: MeshTrafficFilterInput)`
+accepts the same window and filters as the summary. It picks the smallest supported
+UTC bucket width that fits the window in at most 120 buckets and returns it as
+`intervalSeconds`. The first and last bucket are clipped to the exact requested
+bounds. Each bucket reports receptions, distinct wire packets, distinct encoded
+payloads, and independent SNR and RSSI sample counts and averages.
+
+Empty buckets have zero stored counts and `null` averages. Coverage is always
+`UNKNOWN`; an empty bucket does not establish that the mesh was quiet. Use the
+summary for window-wide distinct totals rather than adding bucket counts. Each
+trend is one consistent read; a separate summary may see newer data.
+
+### Frame-size and signal distributions
+
+`meshTrafficDistributions(from: Instant!, to: Instant!, filter: MeshTrafficFilterInput)`
+uses the same exact bounds and filters. `frameSizeBytes` counts one sample per
+distinct linked wire packet, measured from the stored frame bytes. `snr` and
+`rssi` count valid samples per matching reception, including an unlinked reception
+unless a packet-type filter excludes it. Missing values and non-finite SNR are
+not samples. The three histograms use one database snapshot.
+
+Each histogram includes its own sample count and all buckets, even empty ones.
+Buckets include their lower edge and exclude their upper edge; a `null` edge
+means unbounded on that side. Finite edges are 32–256 bytes in steps of 32,
+−30–20 dB in steps of 5, and −130–−30 dBm in steps of 10. These are grouping
+edges, not validity limits. Coverage remains `UNKNOWN`.
 
 ### Grouped packets
 

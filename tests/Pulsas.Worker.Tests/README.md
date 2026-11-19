@@ -15,6 +15,28 @@ reception-browser operations copied from the old client into
 `tests/fixtures/graphql/reception-browser.graphql`. Do not set a retained database
 connection for this suite.
 
+The `Mesh_traffic_` Gateway tests cover the summary, trend, and distributions.
+For timing output, run `Mesh_traffic_reads_stay_within_gateway_limits_on_a_synthetic_month`
+against the disposable database with `--logger 'console;verbosity=detailed'`.
+It ingests the canonical packet and observer identities through durable delivery,
+then seeds bulk receptions via EF for read qualification: 2,000 receptions/day
+for 30 days, eight observers, one region, 128 wire packets over 32 payloads,
+75% of arrivals in a roughly 30-minute daily burst, and independent missing
+SNR (10%) and RSSI (20%) samples. It measures each full GraphQL read at 24h, 7d,
+and 30d after warm-up, with and without an observer filter, three times. On a
+local PostgreSQL 18 run, the slowest observed unfiltered HTTP reads were:
+
+| Read | SQL reads | 24h (2,000 rows) | 7d (14,000 rows) | 30d (60,000 rows) |
+| --- | ---: | ---: | ---: | ---: |
+| Summary | 3 | 8 ms | 30 ms | 61 ms |
+| Trend | 1 | 20 ms | 104 ms | 478 ms |
+| Distributions | 2 | 7 ms | 11 ms | 22 ms |
+
+The slowest SQL read was the unfiltered 30-day trend (475 ms, rounded up).
+All measured requests fit the 2-second command and 3-second Gateway timeout
+settings. This does not measure ingestion throughput, a dense tag catalogue,
+high-cardinality packet traffic, or production load.
+
 `Shared_payloads_expose_canonical_packets_and_earliest_retained_representative`
 ingests repeat receptions and distinct wire packets through production delivery.
 It checks payload ordering, totals, representative selection (including backfill,

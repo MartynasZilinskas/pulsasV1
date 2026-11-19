@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using NodaTime;
 using Pulsas.Persistence.Analytics;
 using Pulsas.Persistence.Brokers;
 using Pulsas.Persistence.Nodes;
@@ -44,6 +45,7 @@ public class TrackingDbContext(DbContextOptions<TrackingDbContext> options) : Db
     protected override void OnModelCreating(ModelBuilder model)
     {
         base.OnModelCreating(model);
+        model.HasDbFunction(() => ArrivalBuckets.Bin(default, default, NodaConstants.UnixEpoch));
         var assessment = model.Entity<ReceptionPathAssessment>();
         assessment.ToTable("reception_path_assessments");
         assessment.HasKey(row => row.ReceptionId);

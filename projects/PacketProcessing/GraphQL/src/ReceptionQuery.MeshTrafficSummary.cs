@@ -2,6 +2,7 @@ using HotChocolate.CostAnalysis.Types;
 using HotChocolate.Resolvers;
 using NodaTime;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using static Pulsas.PacketProcessing.Contracts.Paths.IMeshTrafficReadManager;
 using static Pulsas.PacketProcessing.GraphQL.ReceptionBrowserCursor;
 
 namespace Pulsas.PacketProcessing.GraphQL;
@@ -22,6 +23,23 @@ public partial class ReceptionQuery
         CancellationToken cancellationToken
     )
     {
+        var window = TrafficWindowFrom(from, to, filter);
+        return new(
+            from,
+            to,
+            await reads.ReadSummaryAsync(
+                new(window, context.IsSelected("packetTypeCounts")),
+                cancellationToken
+            )
+        );
+    }
+
+    private static TrafficWindow TrafficWindowFrom(
+        Instant from,
+        Instant to,
+        MeshTrafficFilterInput? filter
+    )
+    {
         if (from >= to || to - from > Duration.FromDays(30))
         {
             throw Error(
@@ -33,20 +51,6 @@ public partial class ReceptionQuery
         var normalized = ReceptionBrowserFilter.FromInput(
             new(filter?.ObserverIds, filter?.RegionCodes, filter?.PacketTypes, null, null)
         );
-        return new(
-            from,
-            to,
-            await reads.ReadSummaryAsync(
-                new(
-                    from,
-                    to,
-                    normalized.Observers,
-                    normalized.Regions,
-                    normalized.Types,
-                    context.IsSelected("packetTypeCounts")
-                ),
-                cancellationToken
-            )
-        );
+        return new(from, to, normalized.Observers, normalized.Regions, normalized.Types);
     }
 }
