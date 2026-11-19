@@ -5,21 +5,19 @@ using Microsoft.Extensions.Configuration;
 using NodaTime;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.GroupText;
+using Pulsas.PacketProcessing.Contracts.Chat;
+using Pulsas.PacketProcessing.Core.Chat;
 using Pulsas.Persistence.Chat;
 using Pulsas.TrafficGenerator;
-using Pulsas.Worker.ApiService.Chat;
 using Pulsas.Worker.ApiService.Configuration;
 using Pulsas.Worker.ApiService.Delivery;
 using Xunit;
-using static Pulsas.Worker.ApiService.Chat.IGroupTextManager;
+using static Pulsas.PacketProcessing.Contracts.Chat.IGroupTextManager;
 
 namespace Pulsas.Worker.Tests;
 
 public partial class AdvertIntegrationTestsDelivery
 {
-    private static PacketConfiguration EmptyPacketConfiguration() =>
-        PacketConfiguration.Read(new ConfigurationBuilder().Build());
-
     private static PacketConfiguration HashtagConfiguration(string name = "#test") =>
         PacketConfiguration.Read(
             new ConfigurationBuilder()
@@ -89,7 +87,11 @@ public partial class AdvertIntegrationTestsDelivery
                         ReportQueues.Content,
                         packetConfiguration: configuration,
                         groupText: database => new FailingGroupTextAfterWrite(
-                            new GroupTextManager(database, configuration, SystemClock.Instance)
+                            new GroupTextManager(
+                                database,
+                                configuration.Channels,
+                                SystemClock.Instance
+                            )
                         )
                     )
                 );

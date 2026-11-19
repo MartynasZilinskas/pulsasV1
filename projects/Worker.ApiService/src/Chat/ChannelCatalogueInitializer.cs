@@ -1,3 +1,4 @@
+using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.Persistence;
 
 namespace Pulsas.Worker.ApiService.Chat;

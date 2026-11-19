@@ -2,17 +2,18 @@ using System.Security.Cryptography;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using Npgsql;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Ingestion;
+using Pulsas.Persistence;
 using Pulsas.Persistence.Brokers;
 using Pulsas.Persistence.Observers;
 using Pulsas.Persistence.Packets;
 using Pulsas.Persistence.Receptions;
-using static Pulsas.Persistence.Ingestion.IReportIngestionManager;
+using static Pulsas.PacketProcessing.Contracts.Ingestion.IReportIngestionManager;
 using PacketOutcome = Pulsas.PacketProcessing.Contracts.Processing.PacketOutcome;
 using PayloadInterpretation = Pulsas.PacketProcessing.Contracts.Processing.PayloadInterpretation;
 
-namespace Pulsas.Persistence.Ingestion;
+namespace Pulsas.PacketProcessing.Core.Ingestion;
 
 public class ReportIngestionManager(TrackingDbContext database, IClock clock)
     : IReportIngestionManager
@@ -39,7 +40,11 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
             );
             if (existing is not null)
             {
-                return new IngestReportResult(existing, IsDuplicate: true);
+                return new IngestReportResult(
+                    existing.Id,
+                    IsDuplicate: true,
+                    Option<PacketContentIdentity>.None
+                );
             }
         }
         var region = await database.Regions.SingleOrDefaultAsync(
@@ -200,7 +205,14 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
         try
         {
             await database.SaveChangesAsync(cancellationToken);
-            return new IngestReportResult(reception, IsDuplicate: false);
+            var contentIdentity = Option
+                .FromNullable(packet)
+                .Select(storedPacket => new PacketContentIdentity(
+                    storedPacket.Type,
+                    storedPacket.Content.PayloadVersion,
+                    [.. storedPacket.Content.PayloadHash]
+                ));
+            return new IngestReportResult(reception.Id, IsDuplicate: false, contentIdentity);
         }
         catch (DbUpdateException exception) when (IsConcurrentCreation(exception))
         {
@@ -235,13 +247,7 @@ public class ReportIngestionManager(TrackingDbContext database, IClock clock)
     }
 
     private static bool IsConcurrentCreation(DbUpdateException exception) =>
-        exception.InnerException
-            is PostgresException
-            {
-                SqlState: PostgresErrorCodes.UniqueViolation,
-                SchemaName: "public",
-            } postgres
-        && (postgres.TableName, postgres.ConstraintName)
+        PostgresWriteErrors.PublicUniqueViolation(exception)
             is
                 ("observers", "ux_observers_key")
                 or

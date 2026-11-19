@@ -3,13 +3,15 @@ using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
 using NodaTime;
-using Npgsql;
 using Pulsas.Core.Geography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Payloads.Adverts;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using Pulsas.PacketProcessing.Contracts.Nodes;
+using Pulsas.Persistence;
+using Pulsas.Persistence.Nodes;
+using static Pulsas.PacketProcessing.Contracts.Nodes.IAdvertNodeManager;
 
-namespace Pulsas.Persistence.Nodes;
+namespace Pulsas.PacketProcessing.Core.Nodes;
 
 // A node projection only: packet/reception evidence is deliberately not fabricated.
 public class AdvertNodeManager(TrackingDbContext database, IClock clock) : IAdvertNodeManager
@@ -86,14 +88,8 @@ public class AdvertNodeManager(TrackingDbContext database, IClock clock) : IAdve
             return Unit.Value;
         }
         catch (DbUpdateException exception)
-            when (exception.InnerException
-                    is PostgresException
-                    {
-                        SqlState: PostgresErrorCodes.UniqueViolation,
-                        SchemaName: "public",
-                        TableName: "node_information",
-                        ConstraintName: "IX_node_information_PublicKey",
-                    }
+            when (PostgresWriteErrors.PublicUniqueViolation(exception)
+                    is ("node_information", "IX_node_information_PublicKey")
             )
         {
             return Either<ProcessAdvertError, Unit>.Left(ProcessAdvertError.ConcurrentNodeCreation);

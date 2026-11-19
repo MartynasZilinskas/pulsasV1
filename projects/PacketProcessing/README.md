@@ -2,20 +2,26 @@
 
 Interprets observer packet reports in memory: packet decoding, ADVERT signatures and
 application data. Retains malformed/unsupported content and partial metadata.
-Core owns packet interpretation and path-assessment policy. Worker durably queues
-reports and persists interpreted evidence through EF Core. Worker links configured
-GroupText chat and invokes path assessment inside content delivery. Domain
+Core owns packet interpretation, ingestion, ADVERT node projection, chat projection,
+channel reconciliation, and path-assessment policy. Worker durably queues reports
+and invokes those operations inside its delivery and startup transactions. Domain
 subscriptions are not wired yet.
 
 | Project | Responsibility |
 | --- | --- |
 | Contracts | Shared data and operation interfaces |
-| Core | Decoding, chat linking, evidence updates and path assessment |
-| [Persistence](../Persistence/) | Database storage, transactions and change notifications |
+| Core | Packet processing operations and reception, packet/payload, and traffic reads |
+| [Persistence](../Persistence/) | EF Core context, storage models, mappings, and migrations |
 | GraphQL | Queries and subscriptions for processed results |
 
-Worker hosts MQTT input, transactional ingestion and grouped ADVERT/GroupText processing;
+Worker owns MQTT input, configuration loading, queue ordering, transactions,
+retries, and archival. It passes the same validated channel snapshot to both chat
+managers and commits catalogue reconciliation before starting queue consumers.
 Gateway hosts GraphQL. Notifications for affected packets are not implemented yet.
+
+Gateway wires the read managers from `Core/src/Paths` to the interfaces in
+`Contracts/src/Paths`. The managers query `TrackingDbContext` directly; GraphQL
+depends on the contracts, while Persistence owns the EF model and provider mappings.
 
 ## Reception path assessment
 

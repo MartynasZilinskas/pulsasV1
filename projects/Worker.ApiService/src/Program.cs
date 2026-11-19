@@ -1,13 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using Pulsas.Configuration;
+using Pulsas.PacketProcessing.Contracts.Chat;
+using Pulsas.PacketProcessing.Contracts.Ingestion;
+using Pulsas.PacketProcessing.Contracts.Nodes;
 using Pulsas.PacketProcessing.Contracts.Paths;
 using Pulsas.PacketProcessing.Contracts.Processing;
+using Pulsas.PacketProcessing.Core.Chat;
+using Pulsas.PacketProcessing.Core.Ingestion;
+using Pulsas.PacketProcessing.Core.Nodes;
 using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
-using Pulsas.Persistence.Ingestion;
-using Pulsas.Persistence.Nodes;
 using Pulsas.ServiceDefaults;
 using Pulsas.Worker.ApiService;
 using Pulsas.Worker.ApiService.Chat;
@@ -35,8 +39,16 @@ if (builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IReportReceiver, ReportReceiver>();
     builder.Services.AddScoped<IReportIngestionManager, ReportIngestionManager>();
     builder.Services.AddScoped<IReportQueueProcessor, ReportQueueProcessor>();
-    builder.Services.AddScoped<IGroupTextManager, GroupTextManager>();
-    builder.Services.AddScoped<IChannelCatalogueManager, ChannelCatalogueManager>();
+    builder.Services.AddScoped<IGroupTextManager>(services => new GroupTextManager(
+        services.GetRequiredService<TrackingDbContext>(),
+        services.GetRequiredService<PacketConfiguration>().Channels,
+        services.GetRequiredService<IClock>()
+    ));
+    builder.Services.AddScoped<IChannelCatalogueManager>(services => new ChannelCatalogueManager(
+        services.GetRequiredService<TrackingDbContext>(),
+        services.GetRequiredService<PacketConfiguration>().Channels,
+        services.GetRequiredService<IClock>()
+    ));
     builder
         .Services.AddOptions<ReportDeliveryOptions>()
         .Configure<IConfiguration>(

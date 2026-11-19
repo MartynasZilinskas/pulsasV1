@@ -14,17 +14,23 @@ using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Chat;
+using Pulsas.PacketProcessing.Contracts.Ingestion;
+using Pulsas.PacketProcessing.Contracts.Nodes;
+using Pulsas.PacketProcessing.Core.Chat;
+using Pulsas.PacketProcessing.Core.Ingestion;
+using Pulsas.PacketProcessing.Core.Nodes;
 using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
-using Pulsas.Persistence.Ingestion;
 using Pulsas.Persistence.Nodes;
 using Pulsas.Persistence.Regions;
 using Pulsas.TrafficGenerator;
+using Pulsas.Worker.ApiService.Configuration;
 using Pulsas.Worker.ApiService.Delivery;
 using Xunit;
-using static Pulsas.Persistence.Ingestion.IReportIngestionManager;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using static Pulsas.PacketProcessing.Contracts.Ingestion.IReportIngestionManager;
+using static Pulsas.PacketProcessing.Contracts.Nodes.IAdvertNodeManager;
 
 namespace Pulsas.Worker.Tests;
 
@@ -183,8 +189,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         TrackingDbContext database,
         IAdvertNodeManager? nodes = null,
         IReportIngestionManager? ingestion = null,
-        Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
-        Pulsas.Worker.ApiService.Chat.IGroupTextManager? groupText = null,
+        PacketConfiguration? packetConfiguration = null,
+        IGroupTextManager? groupText = null,
         ILogger<ReportQueueProcessor>? logger = null
     ) =>
         new(
@@ -193,9 +199,9 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
             ingestion ?? new ReportIngestionManager(database, SystemClock.Instance),
             nodes ?? new AdvertNodeManager(database, SystemClock.Instance),
             groupText
-                ?? new Pulsas.Worker.ApiService.Chat.GroupTextManager(
+                ?? new GroupTextManager(
                     database,
-                    packetConfiguration ?? EmptyPacketConfiguration(),
+                    packetConfiguration?.Channels ?? [],
                     SystemClock.Instance
                 ),
             Options.Create(settings),
@@ -207,8 +213,8 @@ public partial class AdvertIntegrationTestsDelivery : IAsyncLifetime
         string queue,
         Func<TrackingDbContext, IAdvertNodeManager>? nodes = null,
         Func<TrackingDbContext, IReportIngestionManager>? ingestion = null,
-        Pulsas.Worker.ApiService.Configuration.PacketConfiguration? packetConfiguration = null,
-        Func<TrackingDbContext, Pulsas.Worker.ApiService.Chat.IGroupTextManager>? groupText = null,
+        PacketConfiguration? packetConfiguration = null,
+        Func<TrackingDbContext, IGroupTextManager>? groupText = null,
         ILogger<ReportQueueProcessor>? logger = null
     )
     {

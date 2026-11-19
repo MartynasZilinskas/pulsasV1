@@ -4,10 +4,11 @@ using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using Pulsas.MeshCore.Packets;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.Persistence;
 using Pulsas.Persistence.Receptions;
 using static Pulsas.PacketProcessing.Contracts.Paths.IMeshTrafficReadManager;
 
-namespace Pulsas.Persistence.Paths;
+namespace Pulsas.PacketProcessing.Core.Paths;
 
 public partial class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFactory)
     : IMeshTrafficReadManager

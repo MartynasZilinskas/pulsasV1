@@ -20,17 +20,16 @@ using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
 using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.PacketProcessing.Core.Chat;
+using Pulsas.PacketProcessing.Core.Ingestion;
+using Pulsas.PacketProcessing.Core.Nodes;
 using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.Core.Processing;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Chat;
-using Pulsas.Persistence.Ingestion;
-using Pulsas.Persistence.Nodes;
 using Pulsas.Persistence.Paths;
 using Pulsas.Persistence.Regions;
 using Pulsas.TrafficGenerator;
-using Pulsas.Worker.ApiService.Chat;
-using Pulsas.Worker.ApiService.Configuration;
 using Pulsas.Worker.ApiService.Delivery;
 using Pulsas.Worker.Tests.Simulation;
 using Xunit;
@@ -91,11 +90,7 @@ public partial class PathAssessmentIntegrationTests
                 new PacketProcessingManager(),
                 new ReportIngestionManager(db, SystemClock.Instance),
                 new AdvertNodeManager(db, SystemClock.Instance),
-                new GroupTextManager(
-                    db,
-                    PacketConfiguration.Read(new ConfigurationBuilder().Build()),
-                    SystemClock.Instance
-                ),
+                new GroupTextManager(db, [], SystemClock.Instance),
                 Options.Create(settings),
                 NullLogger<ReportQueueProcessor>.Instance,
                 new PathAssessmentManager(db, SystemClock.Instance)
@@ -2549,11 +2544,7 @@ public partial class PathAssessmentIntegrationTests
             new PacketProcessingManager(),
             new ReportIngestionManager(db, SystemClock.Instance),
             new AdvertNodeManager(db, SystemClock.Instance),
-            new GroupTextManager(
-                db,
-                PacketConfiguration.Read(new ConfigurationBuilder().Build()),
-                SystemClock.Instance
-            ),
+            new GroupTextManager(db, [], SystemClock.Instance),
             Options.Create(database.Options),
             NullLogger<ReportQueueProcessor>.Instance,
             cancelAfterAssessment is not null

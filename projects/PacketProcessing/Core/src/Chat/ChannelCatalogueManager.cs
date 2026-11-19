@@ -1,19 +1,18 @@
+using System.Collections.Immutable;
 using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using Npgsql;
 using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Chat;
-using Pulsas.Worker.ApiService.Configuration;
-using static Pulsas.Worker.ApiService.Chat.IChannelCatalogueManager;
+using static Pulsas.PacketProcessing.Contracts.Chat.IChannelCatalogueManager;
 
-namespace Pulsas.Worker.ApiService.Chat;
+namespace Pulsas.PacketProcessing.Core.Chat;
 
 public class ChannelCatalogueManager(
     TrackingDbContext database,
-    PacketConfiguration configuration,
+    ImmutableArray<ConfiguredChannel> channels,
     IClock clock
 ) : IChannelCatalogueManager
 {
@@ -22,7 +21,7 @@ public class ChannelCatalogueManager(
     )
     {
         var rows = await database.Channels.ToListAsync(cancellationToken);
-        foreach (var configured in configuration.Channels)
+        foreach (var configured in channels)
         {
             var row = rows.SingleOrDefault(existing => HasIdentity(existing, configured));
             if (row is null)
@@ -43,7 +42,7 @@ public class ChannelCatalogueManager(
         }
         foreach (var row in rows)
         {
-            if (!configuration.Channels.Any(configured => HasIdentity(row, configured)))
+            if (!channels.Any(configured => HasIdentity(row, configured)))
             {
                 row.Active = false;
                 row.Public = false;
@@ -55,16 +54,13 @@ public class ChannelCatalogueManager(
             return Unit.Value;
         }
         catch (DbUpdateException exception)
-            when (exception.InnerException
-                    is PostgresException
-                    {
-                        SqlState: PostgresErrorCodes.UniqueViolation,
-                        SchemaName: "public",
-                        TableName: "channels",
-                        ConstraintName: "IX_channels_Kind"
+            when (PostgresWriteErrors.PublicUniqueViolation(exception)
+                    is (
+                        "channels",
+                        "IX_channels_Kind"
                             or "IX_channels_Name"
-                            or "IX_channels_ConfigurationId",
-                    }
+                            or "IX_channels_ConfigurationId"
+                    )
             )
         {
             return Either<ReconcileChannelsError, Unit>.Left(

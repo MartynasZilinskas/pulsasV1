@@ -6,16 +6,16 @@ using Npgmq;
 using Npgsql;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Chat;
+using Pulsas.PacketProcessing.Contracts.Ingestion;
+using Pulsas.PacketProcessing.Contracts.Nodes;
 using Pulsas.PacketProcessing.Contracts.Paths;
 using Pulsas.PacketProcessing.Contracts.Processing;
 using Pulsas.PacketProcessing.Contracts.Reports;
 using Pulsas.Persistence;
-using Pulsas.Persistence.Ingestion;
-using Pulsas.Persistence.Nodes;
-using Pulsas.Worker.ApiService.Chat;
-using static Pulsas.Persistence.Ingestion.IReportIngestionManager;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
-using static Pulsas.Worker.ApiService.Chat.IGroupTextManager;
+using static Pulsas.PacketProcessing.Contracts.Chat.IGroupTextManager;
+using static Pulsas.PacketProcessing.Contracts.Ingestion.IReportIngestionManager;
+using static Pulsas.PacketProcessing.Contracts.Nodes.IAdvertNodeManager;
 using static Pulsas.Worker.ApiService.Delivery.IReportReceiver;
 
 namespace Pulsas.Worker.ApiService.Delivery;
@@ -195,25 +195,27 @@ public class ReportQueueProcessor(
                 {
                     logger.LogInformation(
                         "Duplicate reception {ReceptionId} from observer {Observer} via broker {Broker} arriving at {ArrivedAt}",
-                        result.Reception.Id,
+                        result.ReceptionId,
                         parts[2].ToLowerInvariant(),
                         input.BrokerEndpoint,
                         input.ArrivedAt
                     );
                     return null;
                 }
-                var reception = result.Reception;
-                if (reception.Packet is { } packet)
-                {
-                    var group =
-                        $"{(byte)packet.Type}:{packet.Content.PayloadVersion}:{Convert.ToHexStringLower(packet.Content.PayloadHash)}";
-                    await queue.SendAsync(
-                        options.Value.ContentQueue,
-                        new ContentWork(reception.Id),
-                        new Dictionary<string, object> { ["x-pgmq-group"] = group },
-                        cancellationToken
-                    );
-                }
+                await result.Content.Match(
+                    none: () => Task.CompletedTask,
+                    some: async content =>
+                    {
+                        var group =
+                            $"{(byte)content.Type}:{content.PayloadVersion}:{Convert.ToHexStringLower(content.PayloadHash.AsSpan())}";
+                        await queue.SendAsync(
+                            options.Value.ContentQueue,
+                            new ContentWork(result.ReceptionId),
+                            new Dictionary<string, object> { ["x-pgmq-group"] = group },
+                            cancellationToken
+                        );
+                    }
+                );
                 return null;
             }
         );

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Pulsas.PacketProcessing.Contracts.Chat;
+using Pulsas.PacketProcessing.Core.Chat;
 
 namespace Pulsas.Worker.ApiService.Configuration;
 
@@ -70,7 +71,7 @@ public static class ChatConfiguration
         {
             try
             {
-                result.Add(new(kind, name, id, publication, key));
+                result.Add(ConfiguredChannel.Create(kind, name, id, publication, key));
             }
             finally
             {

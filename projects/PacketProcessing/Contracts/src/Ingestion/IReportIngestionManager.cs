@@ -1,8 +1,9 @@
+using System.Collections.Immutable;
 using Funcky.Monads;
+using Pulsas.MeshCore.Packets;
 using Pulsas.PacketProcessing.Contracts.Processing;
-using Pulsas.Persistence.Receptions;
 
-namespace Pulsas.Persistence.Ingestion;
+namespace Pulsas.PacketProcessing.Contracts.Ingestion;
 
 public interface IReportIngestionManager
 {
@@ -12,7 +13,17 @@ public interface IReportIngestionManager
         IPacketProcessingManager.Result Interpreted
     );
 
-    record IngestReportResult(MeshPacketReception Reception, bool IsDuplicate);
+    record IngestReportResult(
+        Guid ReceptionId,
+        bool IsDuplicate,
+        Option<PacketContentIdentity> Content
+    );
+
+    record PacketContentIdentity(
+        PacketType Type,
+        short PayloadVersion,
+        ImmutableArray<byte> PayloadHash
+    );
 
     enum IngestReportError
     {

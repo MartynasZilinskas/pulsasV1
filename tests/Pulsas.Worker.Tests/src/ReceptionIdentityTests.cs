@@ -1,5 +1,5 @@
 using Pulsas.PacketProcessing.Contracts.Reports;
-using Pulsas.Persistence.Ingestion;
+using Pulsas.PacketProcessing.Core.Ingestion;
 using Xunit;
 
 namespace Pulsas.Worker.Tests;

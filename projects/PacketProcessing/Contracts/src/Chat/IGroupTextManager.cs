@@ -1,7 +1,7 @@
 using Funcky;
 using Funcky.Monads;
 
-namespace Pulsas.Worker.ApiService.Chat;
+namespace Pulsas.PacketProcessing.Contracts.Chat;
 
 public interface IGroupTextManager
 {

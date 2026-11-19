@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MQTTnet;
@@ -9,7 +10,9 @@ using Npgsql;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.GroupText;
+using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.Persistence;
+using Pulsas.Persistence.Chat;
 using Pulsas.Persistence.Regions;
 using Pulsas.TrafficGenerator;
 using Pulsas.Worker.ApiService.Delivery;
@@ -74,6 +77,17 @@ public class WorkerPipelineIntegrationTests
                     CountryCode = "LT",
                 }
             );
+            var retiredChannelId = Guid.NewGuid();
+            database.Channels.Add(
+                new Channel
+                {
+                    Id = retiredChannelId,
+                    Kind = ChannelKind.Hashtag,
+                    Name = "#retired",
+                    Active = true,
+                    Public = true,
+                }
+            );
             await database.SaveChangesAsync(token);
             worker.StartInfo = new ProcessStartInfo("dotnet")
             {
@@ -122,6 +136,12 @@ public class WorkerPipelineIntegrationTests
                 await Task.Delay(25, token);
             }
 
+            var retiredChannel = await database
+                .Channels.AsNoTracking()
+                .SingleAsync(channel => channel.Id == retiredChannelId, token);
+            Assert.False(retiredChannel.Active);
+            Assert.False(retiredChannel.Public);
+
             using var publisher = new MqttClientFactory().CreateMqttClient();
             await publisher.ConnectAsync(
                 new MqttClientOptionsBuilder()
@@ -135,6 +155,14 @@ public class WorkerPipelineIntegrationTests
             var observer = Convert.ToHexStringLower(observerKey.PublicKey.AsSpan());
             var at = DateTimeOffset.UtcNow;
             var raw = ObserverReports.CreateAdvert(sender, 1, at);
+            var advert = PacketCodec
+                .Decode(Convert.FromHexString(raw))
+                .Match(
+                    left: error => throw new InvalidOperationException(error.ToString()),
+                    right: packet => packet
+                );
+            var advertGroup =
+                $"4:0:{Convert.ToHexStringLower(SHA256.HashData(advert.Payload.AsSpan()))}";
             async Task Publish(
                 string packet,
                 DateTimeOffset timestamp,
@@ -205,6 +233,15 @@ public class WorkerPipelineIntegrationTests
                 Assert.Equal(0L, reader.GetInt64(4));
                 await Task.Delay(25, token);
             }
+            await using var grouped = database.Database.GetDbConnection().CreateCommand();
+            grouped.CommandText =
+                "SELECT count(*) FROM pgmq.a_packet_content WHERE headers->>'x-pgmq-group' = @group";
+            var groupParameter = grouped.CreateParameter();
+            groupParameter.ParameterName = "group";
+            groupParameter.Value = advertGroup;
+            grouped.Parameters.Add(groupParameter);
+            Assert.Equal(2L, await grouped.ExecuteScalarAsync(token));
+
             var receptions = await database
                 .MeshPacketReceptions.AsNoTracking()
                 .Include(row => row.Observer)

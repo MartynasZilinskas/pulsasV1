@@ -5,12 +5,13 @@ using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.Persistence;
 using Pulsas.Persistence.Packets;
 using Pulsas.Persistence.Receptions;
 using static Pulsas.PacketProcessing.Contracts.Paths.IReceptionBrowserManager;
 using static Pulsas.PacketProcessing.Contracts.Paths.IReceptionReadManager;
 
-namespace Pulsas.Persistence.Paths;
+namespace Pulsas.PacketProcessing.Core.Paths;
 
 public class ReceptionReadManager(IDbContextFactory<TrackingDbContext> dbFactory)
     : IReceptionReadManager,

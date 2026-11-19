@@ -6,10 +6,12 @@ using NodaTime;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Nodes;
 using Pulsas.MeshCore.Payloads.Adverts;
+using Pulsas.PacketProcessing.Contracts.Nodes;
+using Pulsas.PacketProcessing.Core.Nodes;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Nodes;
 using Xunit;
-using static Pulsas.Persistence.Nodes.IAdvertNodeManager;
+using static Pulsas.PacketProcessing.Contracts.Nodes.IAdvertNodeManager;
 
 namespace Pulsas.Worker.Tests;
 

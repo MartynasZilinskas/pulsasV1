@@ -29,6 +29,13 @@
   interface (for example, `IUserManager.CreateUserInput` and
   `IUserManager.CreateUserResult`). Do not require artificial interfaces for
   utilities or framework-hosted services.
+- Place business-operation managers, including read-only managers, in the
+  project that owns the operation. In a `Core`/`Contracts` split such as
+  `PacketProcessing`, put implementations in `Core` and interfaces in `Contracts`.
+  `Persistence` owns storage: EF Core contexts, entities, mappings, migrations,
+  and storage-specific helpers, not business managers. Managers may use EF Core
+  directly; repository wrappers are not required. Do not relocate unrelated
+  existing managers solely to apply this rule.
 - For async or otherwise cancellable operations, use
   `CancellationToken cancellationToken` as the final, required parameter and pass
   it through downstream calls, including persistence and I/O. Propagate

@@ -3,7 +3,7 @@ using NodaTime;
 
 namespace Pulsas.Persistence.Analytics;
 
-internal static class ArrivalBuckets
+public static class ArrivalBuckets
 {
     [DbFunction("date_bin", IsBuiltIn = true)]
     public static Instant Bin(Duration width, Instant arrival, Instant origin) =>

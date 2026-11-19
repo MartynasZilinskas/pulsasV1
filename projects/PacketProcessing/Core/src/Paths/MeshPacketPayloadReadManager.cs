@@ -4,10 +4,11 @@ using NodaTime;
 using Npgsql;
 using NpgsqlTypes;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.Persistence;
 using static Pulsas.PacketProcessing.Contracts.Paths.IMeshPacketPayloadReadManager;
 using static Pulsas.PacketProcessing.Contracts.Paths.IReceptionBrowserManager;
 
-namespace Pulsas.Persistence.Paths;
+namespace Pulsas.PacketProcessing.Core.Paths;
 
 public class MeshPacketPayloadReadManager(IDbContextFactory<TrackingDbContext> dbFactory)
     : IMeshPacketPayloadReadManager

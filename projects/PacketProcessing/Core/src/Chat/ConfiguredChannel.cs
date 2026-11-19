@@ -3,11 +3,11 @@ using System.Text.Json.Serialization;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.PacketProcessing.Contracts.Chat;
 
-namespace Pulsas.Worker.ApiService.Configuration;
+namespace Pulsas.PacketProcessing.Core.Chat;
 
 public class ConfiguredChannel
 {
-    internal ConfiguredChannel(
+    private ConfiguredChannel(
         ChannelKind kind,
         string name,
         string? configurationId,
@@ -28,7 +28,15 @@ public class ConfiguredChannel
     public bool Public { get; }
 
     [JsonIgnore]
-    internal ImmutableArray<byte> Key { get; }
+    private ImmutableArray<byte> Key { get; }
+
+    public static ConfiguredChannel Create(
+        ChannelKind kind,
+        string name,
+        string? configurationId,
+        bool publication,
+        ReadOnlySpan<byte> key
+    ) => new(kind, name, configurationId, publication, key);
 
     public GroupChannelKey CreateKey() => new(Key.AsSpan());
 }

@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Pulsas.PacketProcessing.Contracts.Reports;
 
-namespace Pulsas.Persistence.Ingestion;
+namespace Pulsas.PacketProcessing.Core.Ingestion;
 
 public static class ReceptionIdentity
 {

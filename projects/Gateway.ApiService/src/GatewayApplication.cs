@@ -7,9 +7,9 @@ using Microsoft.Net.Http.Headers;
 using NodaTime;
 using Npgsql;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.PacketProcessing.Core.Paths;
 using Pulsas.PacketProcessing.GraphQL;
 using Pulsas.Persistence;
-using Pulsas.Persistence.Paths;
 using Pulsas.ServiceDefaults;
 
 namespace Pulsas.Gateway.ApiService;

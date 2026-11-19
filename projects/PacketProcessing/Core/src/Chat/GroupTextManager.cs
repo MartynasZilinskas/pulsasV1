@@ -1,24 +1,23 @@
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Funcky;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using Npgsql;
 using Pulsas.MeshCore.Packets;
 using Pulsas.MeshCore.Payloads.GroupText;
 using Pulsas.PacketProcessing.Contracts.Chat;
 using Pulsas.Persistence;
 using Pulsas.Persistence.Chat;
-using Pulsas.Worker.ApiService.Configuration;
-using static Pulsas.Worker.ApiService.Chat.IGroupTextManager;
+using static Pulsas.PacketProcessing.Contracts.Chat.IGroupTextManager;
 
-namespace Pulsas.Worker.ApiService.Chat;
+namespace Pulsas.PacketProcessing.Core.Chat;
 
 public class GroupTextManager(
     TrackingDbContext database,
-    PacketConfiguration configuration,
+    ImmutableArray<ConfiguredChannel> channels,
     IClock clock
 ) : IGroupTextManager
 {
@@ -40,7 +39,7 @@ public class GroupTextManager(
         }
 
         var decoded = new List<(ConfiguredChannel Channel, GroupTextMessage Message)>();
-        foreach (var channel in configuration.Channels)
+        foreach (var channel in channels)
         {
             using var key = channel.CreateKey();
             GroupTextCodec
@@ -116,14 +115,8 @@ public class GroupTextManager(
                 await database.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException exception)
-                when (exception.InnerException
-                        is PostgresException
-                        {
-                            SqlState: PostgresErrorCodes.UniqueViolation,
-                            SchemaName: "public",
-                            TableName: "chat_messages",
-                            ConstraintName: "IX_chat_messages_ChannelId_PayloadHash",
-                        }
+                when (PostgresWriteErrors.PublicUniqueViolation(exception)
+                        is ("chat_messages", "IX_chat_messages_ChannelId_PayloadHash")
                 )
             {
                 return Either<ProcessGroupTextError, Unit>.Left(

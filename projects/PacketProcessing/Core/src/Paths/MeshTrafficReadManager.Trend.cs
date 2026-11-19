@@ -5,7 +5,7 @@ using NodaTime;
 using Pulsas.Persistence.Analytics;
 using static Pulsas.PacketProcessing.Contracts.Paths.IMeshTrafficReadManager;
 
-namespace Pulsas.Persistence.Paths;
+namespace Pulsas.PacketProcessing.Core.Paths;
 
 public partial class MeshTrafficReadManager
 {

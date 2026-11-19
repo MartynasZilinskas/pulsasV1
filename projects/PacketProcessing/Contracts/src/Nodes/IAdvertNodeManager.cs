@@ -2,7 +2,7 @@ using Funcky;
 using Funcky.Monads;
 using Pulsas.MeshCore.Payloads.Adverts;
 
-namespace Pulsas.Persistence.Nodes;
+namespace Pulsas.PacketProcessing.Contracts.Nodes;
 
 public interface IAdvertNodeManager
 {
