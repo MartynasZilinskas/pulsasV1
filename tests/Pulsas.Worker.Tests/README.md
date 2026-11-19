@@ -16,6 +16,10 @@ reception-browser operations copied from the old client into
 connection for this suite.
 
 The `Mesh_traffic_` Gateway tests cover the summary, trend, and distributions.
+The summary fixture checks that two observers hearing the same frame in different
+hours contribute to both trend buckets but count as one wire packet in the window
+summary. A different path adds a wire packet without adding a shared payload.
+
 For timing output, run `Mesh_traffic_reads_stay_within_gateway_limits_on_a_synthetic_month`
 against the disposable database with `--logger 'console;verbosity=detailed'`.
 It ingests the canonical packet and observer identities through durable delivery,
@@ -28,14 +32,18 @@ local PostgreSQL 18 run, the slowest observed unfiltered HTTP reads were:
 
 | Read | SQL reads | 24h (2,000 rows) | 7d (14,000 rows) | 30d (60,000 rows) |
 | --- | ---: | ---: | ---: | ---: |
-| Summary | 3 | 8 ms | 30 ms | 61 ms |
-| Trend | 1 | 20 ms | 104 ms | 478 ms |
-| Distributions | 2 | 7 ms | 11 ms | 22 ms |
+| Summary | 3 | 9.2 ms | 14.6 ms | 53.0 ms |
+| Trend | 1 | 19.6 ms | 80.8 ms | 369.0 ms |
+| Distributions | 2 | 11.2 ms | 6.7 ms | 25.6 ms |
 
-The slowest SQL read was the unfiltered 30-day trend (475 ms, rounded up).
+The slowest SQL read was the unfiltered 30-day trend (286.3 ms).
 All measured requests fit the 2-second command and 3-second Gateway timeout
-settings. This does not measure ingestion throughput, a dense tag catalogue,
-high-cardinality packet traffic, or production load.
+settings. This workload does not justify rollups. Before adding them, profile
+the 30-day trend with higher packet cardinality and concurrent ingestion and reads,
+and the summary with a denser tag catalogue. If those reads approach the limits,
+inspect the query plans first. Any rollup must preserve exact window totals:
+adding per-bucket distinct counts would double-count packets and payloads seen
+in several buckets. These timings do not qualify production load or ingestion throughput.
 
 `Shared_payloads_expose_canonical_packets_and_earliest_retained_representative`
 ingests repeat receptions and distinct wire packets through production delivery.

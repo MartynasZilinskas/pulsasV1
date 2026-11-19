@@ -31,7 +31,7 @@ public partial class PathAssessmentIntegrationTests
         using var observer = AdvertSigningKey.Generate();
         using var advertiser = AdvertSigningKey.Generate();
         var from = DateTimeOffset
-            .FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+            .FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 3600 * 3600)
             .AddHours(-3);
         var to = from.AddHours(3);
         var raw = SignedAdvertWithFirstHop(advertiser, from, [0x11]);
@@ -69,11 +69,27 @@ public partial class PathAssessmentIntegrationTests
 
         var untagged = await ReadAsync(from, to);
         AssertTotals(untagged, 3, 2, 1);
+        Assert.Equal(2, untagged.GetProperty("activeObserverCount").GetInt64());
         Assert.Empty(untagged.GetProperty("tags").EnumerateArray());
         Assert.Equal(3, untagged.GetProperty("snr").GetProperty("sampleCount").GetInt64());
         Assert.Equal(6.5, untagged.GetProperty("snr").GetProperty("average").GetDouble());
         Assert.Equal(2, untagged.GetProperty("rssi").GetProperty("sampleCount").GetInt64());
         Assert.Equal(-75, untagged.GetProperty("rssi").GetProperty("average").GetDouble());
+
+        // The same frame contributes to both arrival buckets, but only once to the summary.
+        var trend = Trend(await PostTrafficQueryAsync(client, TrendQuery, from, to, null, token));
+        var width = TimeSpan.FromSeconds(trend.GetProperty("intervalSeconds").GetInt32());
+        var active = trend
+            .GetProperty("buckets")
+            .EnumerateArray()
+            .Where(bucket => bucket.GetProperty("receptionCount").GetInt64() > 0)
+            .ToArray();
+        Assert.Collection(
+            active,
+            bucket => AssertBucket(bucket, from, from + width, 1, 1, 1),
+            bucket => AssertBucket(bucket, from.AddHours(1), from.AddHours(1) + width, 1, 1, 1),
+            bucket => AssertBucket(bucket, from.AddHours(2), from.AddHours(2) + width, 1, 1, 1)
+        );
 
         var fractional = await ReadAsync(from.AddTicks(1), to.AddTicks(1));
         AssertTotals(fractional, 3, 2, 1);
@@ -270,7 +286,7 @@ public partial class PathAssessmentIntegrationTests
             const string query = """
                 query ($from: Instant!, $to: Instant!, $filter: MeshTrafficFilterInput) {
                   meshTrafficSummary(from: $from, to: $to, filter: $filter) {
-                    from to historyCoverage receptionCount wirePacketCount sharedPayloadCount
+                    from to historyCoverage receptionCount wirePacketCount sharedPayloadCount activeObserverCount
                     rssi { average sampleCount } snr { average sampleCount }
                     tags { tag sharedPayloadCount receptionCount }
                   }
