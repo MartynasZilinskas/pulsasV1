@@ -105,6 +105,11 @@ include packet/payload, observer, broker and region summaries. Broker labels omi
 URL paths and query strings. GroupText links include only the ID of a message in
 an active public channel.
 
+GraphQL region codes are plain strings. If a client declares region-code
+variables with the old `IATA` scalar, change them to `String`, preserving any
+list and non-null modifiers (for example, `[IATA!]` becomes `[String!]`). Region
+codes must be nonempty; case and whitespace are preserved.
+
 Browser cursors are scoped to their collection and filters and expire on Gateway
 restart. Restart pagination without a cursor after a restart. If a region code
 is too long to fit in a cursor, changing or deleting that region also invalidates
@@ -117,6 +122,21 @@ including fields selected through aliases or fragments.
 Packet and node catalogue queries, standalone broker queries, chat browsing and
 subscriptions are not part of this slice. Candidate support is summarized by
 stored reasons and counts; raw packets and support source records are not exposed.
+
+### Traffic summary
+
+`meshTrafficSummary(from: Instant!, to: Instant!, filter: MeshTrafficFilterInput)`
+requires explicit server-arrival bounds. The interval includes `from` and excludes
+`to` and may be up to 30 days long. Clients resolve presets to explicit instants.
+Optional filters match observer IDs, exact region codes, and packet types.
+
+The summary counts stored receptions, distinct wire packets, and distinct encoded
+payloads separately; none is a count of physical transmissions. SNR and RSSI
+each report their own sample count and a mean, which is `null` without samples.
+The tag list groups matching payloads and their receptions by current stored tag.
+It is empty when no tags match; groups can overlap and should not be added to
+the overall totals. History coverage is `UNKNOWN`, including for empty windows.
+Later ingestion can change a previously queried window.
 
 ### Grouped packets
 

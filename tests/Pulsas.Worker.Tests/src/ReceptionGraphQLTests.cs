@@ -84,7 +84,9 @@ public class ReceptionGraphQLTests
         Assert.DoesNotContain("type ServiceInfo", schema);
         Assert.Contains("arrivedAt: Instant!", schema);
         Assert.Contains("heardAt: Instant", schema);
-        Assert.Contains("does not restrict values to airport codes", schema);
+        Assert.Contains("regionCodes: [String!]", schema);
+        Assert.Contains("code: String!", schema);
+        Assert.DoesNotContain("IATA", schema);
         Assert.DoesNotContain("sourceReceptionId", schema);
         Assert.DoesNotContain("fromKey", schema);
 
@@ -174,6 +176,55 @@ public class ReceptionGraphQLTests
                 .GetProperty("role")
                 .GetString()
         );
+    }
+
+    [Fact]
+    public async Task Region_codes_use_strings_and_preserve_case_and_whitespace()
+    {
+        const string code = " North-01 ";
+        var reads = new HistogramReads { Region = new(Guid.NewGuid(), code, null, "LT") };
+        await using var app = Build(Environments.Development, true, browser: reads);
+        var executor = await GetExecutorAsync(app, CancellationToken.None);
+        const string query = """
+            query ($codes: [String!]) {
+              meshPacketReceptionHistogram(filter: { regionCodes: $codes }) { isSnapshot }
+              regions { edges { node { code } } }
+            }
+            """;
+        using var result = await ExecuteAsync(
+            executor,
+            query,
+            null,
+            CancellationToken.None,
+            JsonSerializer.Serialize(new { codes = new[] { code } })
+        );
+        Assert.False(
+            result.RootElement.TryGetProperty("errors", out _),
+            result.RootElement.ToString()
+        );
+        Assert.Equal(code, Assert.Single(reads.LastFilter!.RegionCodes));
+        var edges = result
+            .RootElement.GetProperty("data")
+            .GetProperty("regions")
+            .GetProperty("edges");
+        Assert.Equal(
+            code,
+            Assert
+                .Single(edges.EnumerateArray())
+                .GetProperty("node")
+                .GetProperty("code")
+                .GetString()
+        );
+
+        using var invalid = await ExecuteAsync(
+            executor,
+            query,
+            null,
+            CancellationToken.None,
+            """{ "codes": [""] }"""
+        );
+        Assert.Equal("INVALID_INPUT", ErrorCode(invalid));
+        Assert.Equal(1, reads.Calls);
     }
 
     [Fact]
@@ -609,6 +660,8 @@ public class ReceptionGraphQLTests
     {
         private int histogramCalls;
         public int Calls => histogramCalls;
+        public ReceptionFilter? LastFilter { get; private set; }
+        public RegionRow? Region { get; init; }
 
         public Task<ImmutableArray<HistogramCount>> ReadHistogramAsync(
             ReceptionFilter filter,
@@ -619,6 +672,7 @@ public class ReceptionGraphQLTests
         )
         {
             Interlocked.Increment(ref histogramCalls);
+            LastFilter = filter;
             return Task.FromResult(ImmutableArray<HistogramCount>.Empty);
         }
 
@@ -642,7 +696,7 @@ public class ReceptionGraphQLTests
             int limit,
             string? afterCode,
             CancellationToken cancellationToken
-        ) => throw new NotSupportedException();
+        ) => Task.FromResult<ImmutableArray<RegionRow>>(Region is { } row ? [row] : []);
 
         public Task<string?> ReadRegionCodeAsync(
             Guid regionId,

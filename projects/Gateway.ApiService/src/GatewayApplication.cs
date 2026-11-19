@@ -56,6 +56,7 @@ public static class GatewayApplication
                 services.GetRequiredService<ReceptionReadManager>()
             );
             builder.Services.TryAddSingleton<IClock>(SystemClock.Instance);
+            builder.Services.TryAddSingleton<IMeshTrafficReadManager, MeshTrafficReadManager>();
             builder.Services.TryAddSingleton<
                 IMeshPacketPayloadReadManager,
                 MeshPacketPayloadReadManager

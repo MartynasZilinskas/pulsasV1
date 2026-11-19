@@ -74,6 +74,13 @@
   errors; unexpected exceptions and cancellation propagate.
 - Apply these conventions to new or changed code without broad refactoring.
 
+### Application persistence
+
+- Use EF Core for new or changed application persistence queries and commands.
+  Do not use raw SQL (including through EF Core APIs) or bypass EF Core through
+  another database access path unless the user explicitly approves the exception.
+  Do not refactor unchanged persistence code solely to apply this rule.
+
 ### Entity field grouping
 
 - Use record types for identity-less entity field groups, including when the

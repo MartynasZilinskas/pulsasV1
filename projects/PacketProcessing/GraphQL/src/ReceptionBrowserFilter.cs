@@ -10,8 +10,7 @@ namespace Pulsas.PacketProcessing.GraphQL;
 public record MeshPacketReceptionFilterInput(
     [property: GraphQLType(typeof(ListType<NonNullType<IdType>>))]
         IReadOnlyList<string>? ObserverIds,
-    [property: GraphQLType(typeof(ListType<NonNullType<RegionCodeType>>))]
-        IReadOnlyList<string>? RegionCodes,
+    IReadOnlyList<string>? RegionCodes,
     IReadOnlyList<LegacyPacketType>? PacketTypes,
     Instant? ArrivedFrom,
     Instant? ArrivedTo

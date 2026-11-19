@@ -264,7 +264,7 @@ public class ReceptionReadManager(IDbContextFactory<TrackingDbContext> dbFactory
         ];
     }
 
-    private static Instant StoredBoundary(Instant instant)
+    internal static Instant StoredBoundary(Instant instant)
     {
         const int ticksPerMicrosecond = 10;
         var ticks = instant.ToUnixTimeTicks();

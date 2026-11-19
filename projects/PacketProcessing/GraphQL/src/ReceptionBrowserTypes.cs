@@ -62,7 +62,7 @@ public record Broker([property: GraphQLType(typeof(NonNullType<IdType>))] Guid I
 
 public record Region(
     [property: GraphQLType(typeof(NonNullType<IdType>))] Guid Id,
-    [property: GraphQLType(typeof(NonNullType<RegionCodeType>))] string Code,
+    string Code,
     string? Name,
     string CountryCode
 )
