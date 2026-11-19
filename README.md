@@ -131,7 +131,12 @@ requires explicit server-arrival bounds. The interval includes `from` and exclud
 Optional filters match observer IDs, exact region codes, and packet types.
 
 The summary counts stored receptions, distinct wire packets, and distinct encoded
-payloads separately; none is a count of physical transmissions. SNR and RSSI
+payloads separately; none is a count of physical transmissions.
+`activeObserverCount` and `activeRegionCount` count distinct observers and exact
+region codes among matching receptions, not currently online observers or
+configured regions. `packetTypeCounts` partitions matching receptions by stored
+packet type; the final `null` type, when present, counts receptions without a
+linked packet. Only types with matching receptions are listed. SNR and RSSI
 each report their own sample count and a mean, which is `null` without samples.
 The tag list groups matching payloads and their receptions by current stored tag.
 It is empty when no tags match; groups can overlap and should not be added to

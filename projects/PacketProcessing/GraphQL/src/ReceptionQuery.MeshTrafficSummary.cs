@@ -1,4 +1,5 @@
 using HotChocolate.CostAnalysis.Types;
+using HotChocolate.Resolvers;
 using NodaTime;
 using Pulsas.PacketProcessing.Contracts.Paths;
 using static Pulsas.PacketProcessing.GraphQL.ReceptionBrowserCursor;
@@ -16,6 +17,7 @@ public partial class ReceptionQuery
         Instant from,
         Instant to,
         MeshTrafficFilterInput? filter,
+        IResolverContext context,
         [Service] IMeshTrafficReadManager reads,
         CancellationToken cancellationToken
     )
@@ -35,7 +37,14 @@ public partial class ReceptionQuery
             from,
             to,
             await reads.ReadSummaryAsync(
-                new(from, to, normalized.Observers, normalized.Regions, normalized.Types),
+                new(
+                    from,
+                    to,
+                    normalized.Observers,
+                    normalized.Regions,
+                    normalized.Types,
+                    context.IsSelected("packetTypeCounts")
+                ),
                 cancellationToken
             )
         );

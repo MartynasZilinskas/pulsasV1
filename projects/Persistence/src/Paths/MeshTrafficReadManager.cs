@@ -1,7 +1,9 @@
 using System.Data;
 using Funcky.Monads;
 using Microsoft.EntityFrameworkCore;
+using Pulsas.MeshCore.Packets;
 using Pulsas.PacketProcessing.Contracts.Paths;
+using Pulsas.Persistence.Receptions;
 using static Pulsas.PacketProcessing.Contracts.Paths.IMeshTrafficReadManager;
 
 namespace Pulsas.Persistence.Paths;
@@ -15,30 +17,9 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
     )
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var from = ReceptionReadManager.StoredBoundary(input.From);
-        var to = ReceptionReadManager.StoredBoundary(input.To);
-        var receptions = db.MeshPacketReceptions.Where(row =>
-            row.ArrivedAt >= from && row.ArrivedAt < to
-        );
-        if (!input.ObserverIds.IsEmpty)
-        {
-            var observers = input.ObserverIds.ToArray();
-            receptions = receptions.Where(row => observers.Contains(row.ObserverId));
-        }
-        if (!input.RegionCodes.IsEmpty)
-        {
-            var regions = input.RegionCodes.ToArray();
-            receptions = receptions.Where(row => regions.Contains(row.RegionCode));
-        }
-        if (!input.PacketTypes.IsEmpty)
-        {
-            var types = input.PacketTypes.ToArray();
-            receptions = receptions.Where(row =>
-                row.Packet != null && types.Contains(row.Packet.Type)
-            );
-        }
+        var receptions = FilterReceptions(db.MeshPacketReceptions, input);
 
-        // Totals and tags must see the same snapshot while ingestion continues.
+        // Totals and breakdowns must see the same snapshot while ingestion continues.
         await using var transaction = await db.Database.BeginTransactionAsync(
             IsolationLevel.RepeatableRead,
             cancellationToken
@@ -47,6 +28,8 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
             .Select(row => new
             {
                 row.PacketId,
+                row.ObserverId,
+                row.RegionCode,
                 ContentId = (Guid?)row.Packet!.ContentId,
                 Snr = row.Signal.Snr > double.NegativeInfinity
                 && row.Signal.Snr < double.PositiveInfinity
@@ -68,6 +51,8 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
                     .Select(row => row.ContentId)
                     .Distinct()
                     .LongCount(),
+                Observers = group.Select(row => row.ObserverId).Distinct().LongCount(),
+                Regions = group.Select(row => row.RegionCode).Distinct().LongCount(),
                 SnrCount = group.LongCount(row => row.Snr != null),
                 SnrAverage = group.Average(row => row.Snr),
                 RssiCount = group.LongCount(row => row.Rssi != null),
@@ -75,6 +60,10 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
             })
             .SingleOrDefaultAsync(cancellationToken);
 
+        var packetTypeCounts =
+            input.IncludePacketTypeCounts && totals is not null
+                ? await ReadPacketTypeCountsAsync(receptions, cancellationToken)
+                : [];
         var contentCounts = receptions
             .Where(row => row.PacketId != null)
             .GroupBy(row => row.Packet!.ContentId)
@@ -102,9 +91,58 @@ public class MeshTrafficReadManager(IDbContextFactory<TrackingDbContext> dbFacto
             totals?.Receptions ?? 0,
             totals?.Packets ?? 0,
             totals?.Payloads ?? 0,
+            totals?.Observers ?? 0,
+            totals?.Regions ?? 0,
             new(totals?.SnrCount ?? 0, Option.FromNullable(totals?.SnrAverage)),
             new(totals?.RssiCount ?? 0, Option.FromNullable(totals?.RssiAverage)),
+            [
+                .. packetTypeCounts.Select(row => new PacketTypeCount(
+                    Option.FromNullable(row.Type),
+                    row.Count
+                )),
+            ],
             [.. tags]
         );
+    }
+
+    private static Task<StoredPacketTypeCount[]> ReadPacketTypeCountsAsync(
+        IQueryable<MeshPacketReception> receptions,
+        CancellationToken cancellationToken
+    ) =>
+        receptions
+            .GroupBy(row => (PacketType?)row.Packet!.Type)
+            .OrderBy(group => group.Key == null)
+            .ThenBy(group => group.Key)
+            .Select(group => new StoredPacketTypeCount(group.Key, group.LongCount()))
+            .ToArrayAsync(cancellationToken);
+
+    private record StoredPacketTypeCount(PacketType? Type, long Count);
+
+    private static IQueryable<MeshPacketReception> FilterReceptions(
+        IQueryable<MeshPacketReception> receptions,
+        SummaryInput input
+    )
+    {
+        var from = ReceptionReadManager.StoredBoundary(input.From);
+        var to = ReceptionReadManager.StoredBoundary(input.To);
+        receptions = receptions.Where(row => row.ArrivedAt >= from && row.ArrivedAt < to);
+        if (!input.ObserverIds.IsEmpty)
+        {
+            var observers = input.ObserverIds.ToArray();
+            receptions = receptions.Where(row => observers.Contains(row.ObserverId));
+        }
+        if (!input.RegionCodes.IsEmpty)
+        {
+            var regions = input.RegionCodes.ToArray();
+            receptions = receptions.Where(row => regions.Contains(row.RegionCode));
+        }
+        if (!input.PacketTypes.IsEmpty)
+        {
+            var types = input.PacketTypes.ToArray();
+            receptions = receptions.Where(row =>
+                row.Packet != null && types.Contains(row.Packet.Type)
+            );
+        }
+        return receptions;
     }
 }

@@ -18,6 +18,24 @@ public class MeshTrafficSummary(Instant from, Instant to, Summary summary)
     public long WirePacketCount => summary.WirePacketCount;
     public long SharedPayloadCount => summary.SharedPayloadCount;
 
+    [GraphQLDescription("Distinct observers with at least one matching stored reception.")]
+    public long ActiveObserverCount => summary.ActiveObserverCount;
+
+    [GraphQLDescription("Distinct exact region codes with at least one matching stored reception.")]
+    public long ActiveRegionCount => summary.ActiveRegionCount;
+
+    [ListSize(AssumedSize = 17)]
+    [GraphQLDescription(
+        "Matching receptions by stored packet type. A null packet type counts receptions without a linked packet."
+    )]
+    public ImmutableArray<MeshPacketReceptionTypeCount> PacketTypeCounts =>
+        [
+            .. summary.PacketTypeCounts.Select(row => new MeshPacketReceptionTypeCount(
+                row.PacketType.Select(type => (LegacyPacketType)type).ToNullable(),
+                row.Count
+            )),
+        ];
+
     public MeshTrafficSignalSummary Snr =>
         new(summary.Snr.SampleCount, summary.Snr.Average.ToNullable());
     public MeshTrafficSignalSummary Rssi =>
