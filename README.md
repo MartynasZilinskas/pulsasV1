@@ -198,6 +198,27 @@ returns zero counts and `null` first/last arrivals and means.
 `historyCoverage` is `UNKNOWN` in either a populated or empty summary; gaps in
 recorded activity do not establish downtime.
 
+### Observed flood overlap
+
+`observerFloodOverlap(observerAId: ID!, observerBId: ID!, from: Instant!, to: Instant!, filter: ObserverActivityFilterInput)`
+compares two distinct observer UUIDs in the exact `[from, to)` server-arrival
+window, up to 30 days. Optional `regionCodes` match stored receiving regions
+exactly (including case and whitespace); `packetTypes` narrows the eligible
+packets. Only linked wire packets with `Flood` or `TransportFlood` routing count.
+
+Select `onlyACount`, `onlyBCount`, `bothCount`, and `unionCount` with
+`... on ObserverFloodOverlap`. A packet counts once per observer regardless of
+repeated reports. Different encoded paths remain distinct even if their payload
+matches. The first three counts partition the union. “Only” means only among
+the two observers' qualifying stored reports; it does not indicate packet loss,
+missed reception, or observer downtime.
+
+Known observers with no qualifying packets return four zeroes. Successful
+results always report `historyCoverage: UNKNOWN`, even when populated. An
+unknown observer returns `OverlapObserversNotFoundError` with `missingObserverIds`
+in argument order, not a partial comparison. Malformed or equal IDs and invalid
+windows return GraphQL errors.
+
 ### Grouped packets
 
 Use `meshPacketReceptions` for one row per reception, or `meshPacketPayloads`

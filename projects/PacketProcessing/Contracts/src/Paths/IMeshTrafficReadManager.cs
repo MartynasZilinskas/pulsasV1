@@ -20,6 +20,10 @@ public interface IMeshTrafficReadManager
         ObserverActivityInput input,
         CancellationToken cancellationToken
     );
+    Task<Either<MissingOverlapObservers, FloodOverlapCounts>> ReadObserverFloodOverlapAsync(
+        ObserverFloodOverlapInput input,
+        CancellationToken cancellationToken
+    );
 
     public record TrafficWindow(
         Instant From,
@@ -53,6 +57,22 @@ public interface IMeshTrafficReadManager
     );
 
     public record ReceptionBucket(Instant Start, long ReceptionCount);
+
+    public record ObserverFloodOverlapInput(
+        Guid ObserverAId,
+        Guid ObserverBId,
+        Instant From,
+        Instant To,
+        ImmutableArray<string> RegionCodes,
+        ImmutableArray<PacketType> PacketTypes
+    );
+
+    public record MissingOverlapObservers(ImmutableArray<Guid> ObserverIds);
+
+    public record FloodOverlapCounts(long OnlyACount, long OnlyBCount, long BothCount)
+    {
+        public long UnionCount => OnlyACount + OnlyBCount + BothCount;
+    }
 
     public record TrendBucket(
         Instant Start,

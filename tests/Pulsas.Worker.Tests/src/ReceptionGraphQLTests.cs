@@ -191,6 +191,31 @@ public class ReceptionGraphQLTests
     }
 
     [Fact]
+    public async Task Flood_overlap_schema_requires_a_pair_and_preserves_nullable_result_and_cost()
+    {
+        await using var app = Build(Environments.Development, true, new ReceptionReads());
+        var executor = await GetExecutorAsync(app, CancellationToken.None);
+        var field = executor.Schema.QueryType.Fields["observerFloodOverlap"];
+        Assert.Equal("ID!", field.Arguments["observerAId"].Type.ToString());
+        Assert.Equal("ID!", field.Arguments["observerBId"].Type.ToString());
+        Assert.Equal("Instant!", field.Arguments["from"].Type.ToString());
+        Assert.Equal("Instant!", field.Arguments["to"].Type.ToString());
+        var filter = Assert.IsAssignableFrom<InputObjectType>(field.Arguments["filter"].Type);
+        Assert.Equal("ObserverActivityFilterInput", filter.Name);
+        var union = Assert.IsAssignableFrom<UnionType>(field.Type);
+        Assert.Equal("ObserverFloodOverlapResult", union.Name);
+        Assert.Equal(
+            new[] { "ObserverFloodOverlap", "OverlapObserversNotFoundError" },
+            union.Types.Select(type => type.Name).Order()
+        );
+        var miss = executor.Schema.Types.GetType<ObjectType>("OverlapObserversNotFoundError");
+        Assert.Equal("[ID!]!", miss.Fields["missingObserverIds"].Type.ToString());
+        var cost = field.Directives.FirstOrDefault<CostDirective>();
+        Assert.NotNull(cost);
+        Assert.Equal(12_001, cost.ToValue<CostDirective>().Weight);
+    }
+
+    [Fact]
     public async Task Invalid_lookup_and_reader_failure_do_not_erase_sibling_data()
     {
         var reads = new ReceptionReads { Fail = true };
