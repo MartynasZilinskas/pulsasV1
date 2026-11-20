@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@ui-sdk/react/select'
-import { useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { MeshBrandMark } from '../../components/mesh-brand-mark'
 import { NodeAvatar } from '../../components/nodes/node-avatar'
 import { NodeRoleIcon, nodeRoles, type NodeIdentity, type NodeRole } from '../../components/nodes/node-role'
@@ -19,6 +19,9 @@ import { PacketTrafficSpecimens } from './packet-traffic-specimens'
 import { PacketTypeSpecimens } from './packet-type-specimens'
 import { ChannelKindSpecimens, MeshBrandSpecimens } from './static-specimens'
 import './kitchen-sink.css'
+import './map-specimens.css'
+
+const MapSpecimens = lazy(() => import('./map-specimens'))
 
 const roles = ['ROOM_SERVER', 'REPEATER', 'CLIENT', 'SENSOR', 'NONE'] satisfies NodeRole[]
 const roleItems = roles.map((value) => ({ value, label: nodeRoles[value].label }))
@@ -209,6 +212,35 @@ function PacketSpecimens() {
   )
 }
 
+function MapExamplesSection() {
+  const section = useRef<HTMLElement>(null)
+  const [requested, setRequested] = useState(false)
+
+  useEffect(() => {
+    if (!section.current || requested) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      observer.disconnect()
+      setRequested(true)
+    }, { rootMargin: '500px 0px' })
+    observer.observe(section.current)
+    return () => { observer.disconnect() }
+  }, [requested])
+
+  return (
+    <section ref={section} className="ks-section ks-map-section" aria-labelledby="ks-map-heading">
+      <header className="ks-section-heading ks-map-section-heading">
+        <div>
+          <h2 id="ks-map-heading">Map examples</h2>
+          <p>Inspect node markers using a Beacon directory snapshot near Kaunas, then explore generated paths and packet flow. The examples don’t show live reception.</p>
+        </div>
+        <span className="ks-fixture-label">Beacon snapshot · Offline</span>
+      </header>
+      {requested && <Suspense fallback={<p className="ks-map-pending" role="status">Loading map examples…</p>}><MapSpecimens /></Suspense>}
+    </section>
+  )
+}
+
 export function KitchenSinkPage() {
   const [role, setRole] = useState<NodeRole>('ROOM_SERVER')
   const [observer, setObserver] = useState(true)
@@ -241,6 +273,7 @@ export function KitchenSinkPage() {
         <PacketSpecimens />
         <PacketTrafficSpecimens />
         <PacketPathSpecimens />
+        <MapExamplesSection />
         <MeshBrandSpecimens />
       </div>
     </main>

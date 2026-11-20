@@ -64,7 +64,14 @@ seven indicator styles, and browse channel icons and the mesh logo. In Packet
 traffic, zoom into a time range to update both the histogram and table. Open a
 row to view the reception details, or scroll the table for older receptions.
 The full-range table also demonstrates live feed markers with sample events.
-The showcase uses fixtures only; it does not connect to Gateway.
+Map examples reproduce the legacy node states, path evidence, and packet flow
+using a 20 November 2026 [Beacon](https://beacon.atvirastinklas.lt) snapshot: the
+six nearest located KUN nodes within 100 km of the Kaunas showcase center, plus
+one node without a location. Node names, public keys, and advertised coordinates
+are preserved. Role specimens, candidate matches, and packet activity are
+generated examples, not reception evidence. The MapLibre map uses a bundled
+worker and a schematic background; it requests no external map tiles or registry
+data. The showcase does not connect to Gateway.
 The local Web resource is not published.
 
 With the Web resource running, use `mise exec -- npm run test:browser` from
