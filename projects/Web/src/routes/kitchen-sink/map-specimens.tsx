@@ -3,14 +3,15 @@ import { Checkbox, CheckboxIndicator } from '@ui-sdk/react/checkbox'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@ui-sdk/react/collapsible'
 import { Select, SelectContent, SelectItem, SelectItemIndicator, SelectLabel, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack, SliderValue } from '@ui-sdk/react/slider'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { evidenceCandidateKey, pathScene, type EvidenceAnchor } from '../../components/map/map-path-evidence'
 import { MapPreview } from '../../components/map/map-preview'
 import type { FlowPlayback } from '../../components/map/map-preview-flow'
 import { NodeAvatar } from '../../components/nodes/node-avatar'
 import { nodeRoles } from '../../components/nodes/node-role'
 import { PacketPathChain } from '../../components/packets/packet-path-chain'
 import { LucideGlyph } from '../../components/ui/lucide-glyph'
-import { mapCatalogue, pathScene, type MapExample } from './map-catalogue'
+import { mapCatalogue, type MapExample } from './map-catalogue'
 import { mapShowcaseCenter } from './map-fixtures'
 
 const modes = [
@@ -51,6 +52,7 @@ function ScenarioSelector({ examples, selected, choose }: { examples: readonly M
 }
 
 export default function MapSpecimens() {
+  const candidateHelpId = useId()
   const [mode, setMode] = useState<Mode>('paths')
   const [scenarios, setScenarios] = useState({ nodes: 'labels', paths: 'strong', flow: 'route' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -71,6 +73,10 @@ export default function MapSpecimens() {
     const current = hidden.size && example.evidence ? pathScene(example.evidence, hidden, pathId) : example.scene
     return clusterOverride === undefined ? current : { ...current, clustered: clusterOverride }
   }, [clusterOverride, example, hidden, pathId])
+  const candidateFilters = example.evidence?.flatMap(({ matches, prefix }, index) => {
+    const located = matches.filter(({ anchor }) => anchor.coordinates !== null)
+    return located.length > 1 ? [{ index, prefix, located }] : []
+  }) ?? []
 
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)')
@@ -107,10 +113,10 @@ export default function MapSpecimens() {
     if (focus) setFocusRequest((value) => value + 1)
   }
 
-  function focusAnchor(anchor: MapExample['anchors'][number], hopIndex?: number) {
+  function focusAnchor(anchor: EvidenceAnchor, hopIndex?: number) {
     if (!anchor.coordinates) { select(anchor.id, false); return }
     const matches = example.evidence?.flatMap(({ matches }, index) => (
-      (hopIndex === undefined || hopIndex === index) && matches.some((match) => match.anchor.id === anchor.id) ? [`${index}:${anchor.id}`] : []
+      (hopIndex === undefined || hopIndex === index) && matches.some((match) => match.anchor.id === anchor.id) ? [evidenceCandidateKey(index, anchor.id)] : []
     ))
     if (matches?.some((key) => hidden.has(key))) {
       const next = new Set(hidden)
@@ -120,12 +126,19 @@ export default function MapSpecimens() {
     select(anchor.id, true)
   }
 
-  function changeCandidate(key: string, anchorId: string, visible: boolean) {
+  function changeCandidate(hopIndex: number, anchorId: string, visible: boolean) {
+    const key = evidenceCandidateKey(hopIndex, anchorId)
     const next = new Set(hidden)
     if (visible) next.delete(key)
     else {
       next.add(key)
-      if (selectedId === anchorId) setSelectedId(null)
+      const hasLocatedChoice = example.evidence?.[hopIndex].matches.some(({ anchor }) => (
+        anchor.coordinates !== null && !next.has(evidenceCandidateKey(hopIndex, anchor.id))
+      ))
+      if (!hasLocatedChoice) return
+      if (selectedId === anchorId && !example.evidence?.some(({ matches }, index) => (
+        !next.has(evidenceCandidateKey(index, anchorId)) && matches.some(({ anchor }) => anchor.id === anchorId)
+      ))) setSelectedId(null)
     }
     setHidden(next)
     setOverlap([])
@@ -149,7 +162,8 @@ export default function MapSpecimens() {
           <MapPreview
             sceneId={example.id} label={`${example.label} fixture map`} center={mapShowcaseCenter} scene={scene}
             selectedId={selectedId} focusRequest={focusRequest}
-            onPick={(ids) => { if (ids.length === 1) select(ids[0], false); else setOverlap(ids) }}
+            onPick={(ids) => { if (ids.length === 1) select(ids[0], true); else setOverlap(ids) }}
+            onClearSelection={() => { setSelectedId(null); setOverlap([]) }}
             onClusterToggle={mode === 'nodes' ? setClusterOverride : undefined}
             flow={example.flows} playback={playback} onFlowFinish={() => setPlayback(null)}
             renderControls={mode !== 'flow' ? undefined : (ready) => (
@@ -173,28 +187,33 @@ export default function MapSpecimens() {
                 const match = example.evidence?.[hopNumber - 1]?.matches.find(({ anchor }) => anchor.publicKey === candidate.publicKey)
                 if (match) focusAnchor(match.anchor, hopNumber - 1)
               }} /> : <p className="ks-map-inspector-note">No hops recorded.</p>}
-              {scene.paths.length > 0 && <ul className="ks-map-path-key" aria-label="Path map key">
+              {(scene.paths.length > 0 || scene.markers.some(({ ambiguous, presentation }) => ambiguous || presentation === 'gap')) && <ul className="ks-map-path-key" aria-label="Path map key">
                 {scene.paths.some(({ confidence }) => confidence !== 'weak') && <li><span aria-hidden="true" />Strong connection</li>}
                 {scene.paths.some(({ confidence }) => confidence === 'weak') && <li><span className="ks-map-possible-line" aria-hidden="true" />Uncertain connection</li>}
-                {scene.markers.some(({ presentation }) => presentation === 'gap') && <li><span className="ks-map-gap-symbol" aria-hidden="true" />Schematic gap</li>}
+                {scene.markers.some(({ presentation }) => presentation === 'gap') && <li><span className="ks-map-gap-symbol" aria-hidden="true" />Schematic gap (not a node location)</li>}
+                {scene.markers.some(({ ambiguous }) => ambiguous) && <li><span className="ks-map-ambiguity-symbol" aria-hidden="true">?</span>Multiple candidates for a hop</li>}
               </ul>}
-              {example.evidence?.some(({ matches }) => matches.length > 1) && <Collapsible className="ks-map-filters" key={`filters-${example.id}`}>
+              {candidateFilters.length > 0 && <Collapsible className="ks-map-filters" key={`filters-${example.id}`}>
                 <CollapsibleTrigger className="map-preview-button">Show candidates on map</CollapsibleTrigger>
                 <CollapsiblePanel className="ks-map-filters-panel">
-                  {example.evidence.map(({ matches, prefix }, index) => matches.length > 1 && (
-                    <fieldset key={`${index}:${prefix}`}>
+                  <p id={candidateHelpId} className="ks-map-inspector-note">Keep at least one located candidate visible per hop. To hide the last visible candidate, show another first.</p>
+                  {candidateFilters.map(({ index, prefix, located }) => {
+                    const visibleCount = located.filter(({ anchor }) => !hidden.has(evidenceCandidateKey(index, anchor.id))).length
+                    return <fieldset key={`${index}:${prefix}`} aria-describedby={candidateHelpId}>
                       <legend>Hop {index + 1} · <code>{prefix}</code></legend>
-                      {matches.filter(({ anchor }) => anchor.coordinates).map(({ anchor, confidence }) => {
-                        const key = `${index}:${anchor.id}`
+                      {located.map(({ anchor, confidence }) => {
+                        const key = evidenceCandidateKey(index, anchor.id)
+                        const checked = !hidden.has(key)
                         return <label className="ks-checkbox-row" key={key}>
-                          <Checkbox className="ks-checkbox" checked={!hidden.has(key)} onCheckedChange={(checked) => changeCandidate(key, anchor.id, checked === true)}>
+                          <Checkbox className="ks-checkbox" checked={checked} disabled={checked && visibleCount === 1}
+                            onCheckedChange={(value) => changeCandidate(index, anchor.id, value === true)}>
                             <CheckboxIndicator aria-hidden="true"><LucideGlyph name="check" /></CheckboxIndicator>
                           </Checkbox>
                           <span>{anchor.name} · {confidence}</span>
                         </label>
                       })}
                     </fieldset>
-                  ))}
+                  })}
                   <Button className="map-preview-button" disabled={!hidden.size} onClick={() => setHidden(new Set())}>Reset candidate visibility</Button>
                 </CollapsiblePanel>
               </Collapsible>}

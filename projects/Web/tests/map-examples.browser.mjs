@@ -4,6 +4,9 @@ import { chromium } from 'playwright'
 
 const origin = `http://127.0.0.1:${process.env.PULSAS_WEB_TEST_PORT ?? 5173}`
 const url = `${origin}/kitchen-sink`
+const provider = 'https://tiles.openfreemap.org'
+const providerAttribution = '<a href="https://openfreemap.org/">OpenFreeMap</a> © <a href="https://openmaptiles.org/">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+const testTile = Buffer.from('GiB4AgoFd2F0ZXIogCASEhgDIg4JQEAagCAAAIAU/x8ADw==', 'base64') // One MVT water polygon.
 const root = '9b904ae6-8341-487e-9c6d-86a4a90f4070'
 const vilijampole = 'f99f399f-167e-4ac3-ba2a-c950bcf92a89'
 const panerys = 'fd24c30e-606e-453c-96af-082301039c12'
@@ -24,7 +27,7 @@ const pathCases = [
   ['Missing outer hops', 'exterior-missing', [root], 0, 0],
 ]
 const nodeCases = ['Distant dots', 'Role glyphs', 'Labels & collision', 'Raised selection', 'Clusters & counts',
-  'Every role & fallback', 'Overlapping markers', 'Long node label']
+  'Every role & fallback', 'Overlapping markers', 'Near-overlapping markers', 'Dense overlapping markers', 'Long node label']
 const flowCases = [
   ['Moving packet & trail', 'route', 1, ['arrival', 'trail']],
   ['Single-node arrival', 'arrival', 1, ['arrival']],
@@ -35,6 +38,22 @@ const flowCases = [
 ]
 let browser
 
+function mockProvider(route, request) {
+  const headers = { 'access-control-allow-origin': '*' }
+  if (['/styles/positron', '/styles/dark'].includes(request.pathname)) {
+    const dark = request.pathname.endsWith('/dark')
+    return route.fulfill({ headers, json: { version: 8, sources: {}, layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': dark ? '#172028' : '#faf4e8' } },
+      { id: 'water', type: 'fill', source: 'openmaptiles', 'source-layer': 'water', paint: { 'fill-color': dark ? '#234754' : '#a6d5e1' } },
+    ] } })
+  }
+  if (request.pathname === '/planet') {
+    return route.fulfill({ headers, json: { tilejson: '3.0.0', tiles: [`${provider}/planet/test/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14, attribution: 'OpenFreeMap · © OpenStreetMap' } })
+  }
+  if (request.pathname.startsWith('/planet/test/')) return route.fulfill({ headers, body: testTile, contentType: 'application/x-protobuf' })
+  throw new Error(`Unexpected provider request: ${request.pathname}`)
+}
+
 before(async () => {
   browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_EXECUTABLE ?? '/usr/bin/chromium',
@@ -44,7 +63,7 @@ before(async () => {
 
 after(async () => { await browser?.close() })
 
-async function withMap(verify, options = {}, prepare) {
+async function withMap(verify, options = {}, prepare, providerResponse = mockProvider) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 750 }, reducedMotion: 'reduce', ...options })
   page.setDefaultTimeout(8000)
   const external = []
@@ -58,6 +77,7 @@ async function withMap(verify, options = {}, prepare) {
   try {
     await page.context().route('**/*', (route) => {
       const request = new URL(route.request().url())
+      if (request.origin === provider) return providerResponse(route, request)
       if (request.origin !== origin || /^\/(graphql|api)(\/|$)/.test(request.pathname)) {
         external.push(request.href)
         return route.abort()
@@ -85,6 +105,416 @@ async function frameMatching(page, predicate, argument) {
   return await result.jsonValue()
 }
 
+async function exposeOverlapMap(page) {
+  await page.route(/\/src\/components\/map\/map-preview\.tsx(?:\?.*)?$/, async route => {
+    const response = await route.fetch()
+    await route.fulfill({ response, body: (await response.text())
+      .replace('map = new MapLibre(', 'map = window.overlapMap = new MapLibre(')
+      .replace('screenOverlaps(points)', '(window.overlapComputations = (window.overlapComputations ?? 0) + 1, screenOverlaps(points))') })
+  })
+}
+
+for (const [device, options] of [
+  ['desktop', {}],
+  ['mobile', { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }],
+]) test(`Spiderfy is opt-in and reversible without changing selection or camera on ${device}`, async () => {
+  await withMap(async (page, showcase) => {
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    const toggle = showcase.getByRole('button', { name: 'Spiderfy', exact: true })
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    if (device === 'mobile') {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).click()
+      await page.getByRole('option', { name: 'Overlapping markers', exact: true }).click()
+    } else await showcase.getByRole('button', { name: 'Overlapping markers', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'overlap' && window.renderedMap.markerIds.length === 8)
+    assert.equal(await showcase.locator('.map-overlap-stack').count(), 0)
+    assert.equal(await page.evaluate(() => window.overlapComputations ?? 0), 0)
+    const canvas = showcase.getByLabel('Overlapping markers fixture map', { exact: true })
+    for (const method of ['click', 'press']) {
+      if (method === 'press') await canvas.press('Enter')
+      else await canvas.click()
+      await showcase.getByText('8 markers overlap. Choose an anchor from the list.', { exact: true }).waitFor()
+      assert.deepEqual(await page.evaluate(() => window.renderedMap.raisedIds), [])
+    }
+    const camera = () => page.evaluate(() => ({ center: window.overlapMap.getCenter().toArray(), zoom: window.overlapMap.getZoom() }))
+    const before = await camera()
+    await toggle.press('Space')
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+    const stack = showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true })
+    await stack.click()
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.waitFor()
+    assert.deepEqual(await camera(), before)
+    await fan.getByRole('button', { name: /Specimen 2 · Repeater/ }).click()
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds.includes('specimen-1'))
+    await page.waitForFunction(() => !window.overlapMap.isMoving())
+    await showcase.getByRole('radio', { name: 'Dark', exact: true }).click()
+    await stack.click()
+    await fan.waitFor()
+    const selectedCamera = await camera()
+    await toggle.press('Enter')
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+    assert.equal(await showcase.locator('.map-overlap-stack, .map-overlap-content, .map-overlap-tooltip').count(), 0)
+    await frameMatching(page, () => window.renderedMap?.raisedIds.includes('specimen-1') && window.renderedMap.roleIds.length === 8)
+    assert.deepEqual(await camera(), selectedCamera)
+    await showcase.getByText('Selected on map: Specimen 2 · Repeater', { exact: true }).waitFor()
+    const computations = await page.evaluate(() => window.overlapComputations)
+    await page.evaluate(() => { window.overlapMap.triggerRepaint(); window.overlapMap.fire('sourcedata'); window.overlapMap.fire('move') })
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    assert.equal(await page.evaluate(() => window.overlapComputations), computations)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview').screenshot({ path: `../../.tmp/spiderfy-toggle-off-${device}.png` })
+    await toggle.click()
+    await stack.click()
+    await fan.waitFor()
+    assert.deepEqual(await camera(), selectedCamera)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview').screenshot({ path: `../../.tmp/spiderfy-toggle-on-${device}.png` })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    await showcase.getByRole('button', { name: 'Path evidence', exact: true }).click()
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    await page.evaluate(() => window.overlapMap.jumpTo({ zoom: 7 }))
+    await showcase.getByRole('button', { name: 'Choose 2 overlapping nodes', exact: true }).waitFor()
+  }, options, exposeOverlapMap)
+})
+
+test('Spiderfy survives map retry and does not interrupt playback', async () => {
+  await withMap(async (page, showcase) => {
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    const toggle = showcase.getByRole('button', { name: 'Spiderfy', exact: true })
+    await toggle.click()
+    await page.evaluate(() => window.overlapMap.getCanvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true })))
+    const retry = showcase.getByRole('button', { name: 'Retry map', exact: true })
+    await retry.waitFor()
+    assert.equal(await toggle.isDisabled(), true)
+    await retry.click()
+    await page.waitForFunction(() => document.querySelector('.map-preview[data-map-state="ready"]'))
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+    assert.equal(await toggle.isEnabled(), true)
+    await page.evaluate(() => window.overlapMap.jumpTo({ zoom: 7 }))
+    await showcase.getByRole('button', { name: 'Choose 2 overlapping nodes', exact: true }).click()
+    await showcase.getByRole('dialog', { name: '2 overlapping nodes', exact: true }).waitFor()
+    await showcase.getByRole('button', { name: 'Packet flow', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Loop preview', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Pause & clear', exact: true }).waitFor()
+    await toggle.click()
+    await showcase.getByRole('button', { name: 'Pause & clear', exact: true }).waitFor()
+    await toggle.click()
+    await showcase.getByRole('button', { name: 'Pause & clear', exact: true }).waitFor()
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+  }, {}, exposeOverlapMap)
+})
+
+test('empty map clicks clear selection and fan while drags and controls preserve it', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Role glyphs', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'roles')
+    const canvas = showcase.getByLabel('Role glyphs fixture map', { exact: true })
+    await canvas.click()
+    await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).waitFor()
+    await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id), root)
+    await showcase.getByRole('button', { name: 'Zoom in', exact: true }).click()
+    assert.ok(await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).isVisible())
+    const bounds = await canvas.boundingBox()
+    await page.mouse.move(bounds.x + 30, bounds.y + 100)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + 95, bounds.y + 115, { steps: 6 })
+    await page.mouse.up()
+    assert.deepEqual(await page.evaluate(() => window.renderedMap.raisedIds), [root])
+    const credits = showcase.locator('.maplibregl-ctrl-attrib summary')
+    await credits.click()
+    assert.ok(await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).isVisible())
+    await canvas.click({ position: { x: 10, y: 80 } })
+    await frameMatching(page, () => window.renderedMap?.raisedIds.length === 0 && window.renderedMap.selectedNameplateIds.length === 0)
+    await showcase.getByRole('button', { name: 'Overlapping markers', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    const stack = showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true })
+    await stack.click()
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.getByRole('button', { name: /Specimen 2 · Repeater/ }).click()
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds.includes('specimen-1'))
+    await stack.click()
+    await fan.waitFor()
+    await showcase.getByLabel('Overlapping markers fixture map', { exact: true }).click({ position: { x: 10, y: 80 } })
+    await fan.waitFor({ state: 'hidden' })
+    await frameMatching(page, () => window.renderedMap?.raisedIds.length === 0 && window.renderedMap.selectedNameplateIds.length === 0)
+  }, {}, exposeOverlapMap)
+})
+
+test('hover and keyboard focus reveal full native and fan names without picking nodes', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Role glyphs', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'roles')
+    const canvas = showcase.getByLabel('Role glyphs fixture map', { exact: true })
+    assert.deepEqual(await page.evaluate(() => window.renderedMap.labelIds), [])
+    await canvas.hover()
+    const native = showcase.locator('.map-preview-node-hint')
+    await native.getByText('LT-KM ROOT ED', { exact: true }).waitFor()
+    assert.deepEqual(await page.evaluate(() => window.renderedMap.raisedIds), [])
+    if (process.env.PULSAS_CAPTURE_HOVER) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/node-hover-native.png' })
+    await showcase.getByRole('button', { name: 'Fit example', exact: true }).hover()
+    await native.waitFor({ state: 'hidden' })
+    await canvas.focus()
+    await native.getByText('LT-KM ROOT ED', { exact: true }).waitFor()
+    await canvas.blur()
+    await native.waitFor({ state: 'hidden' })
+    await canvas.click()
+    await frameMatching(page, id => window.renderedMap?.selectedNameplateIds.includes(id), root)
+    await showcase.getByRole('radio', { name: 'Dark', exact: true }).click()
+    await canvas.hover()
+    await native.getByText('LT-KM ROOT ED', { exact: true }).waitFor()
+    assert.equal(await native.locator('.maplibregl-popup-content').evaluate(el => getComputedStyle(el).color), 'rgb(237, 244, 238)')
+    await page.evaluate(() => {
+      const map = window.overlapMap, point = map.project([23.89257, 54.91074])
+      map.panBy([point.x - 8, 0], { duration: 0 })
+    })
+    await frameMatching(page, id => !window.renderedMap.selectedNameplateIds.includes(id), root)
+    const edgeBounds = await canvas.boundingBox()
+    await page.mouse.move(edgeBounds.x + 8, edgeBounds.y + edgeBounds.height / 2)
+    await native.getByText('LT-KM ROOT ED', { exact: true }).waitFor()
+    const hintBounds = await native.boundingBox()
+    assert.ok(hintBounds.x >= edgeBounds.x && hintBounds.x + hintBounds.width <= edgeBounds.x + edgeBounds.width)
+    await showcase.getByRole('button', { name: 'Overlapping markers', exact: true }).click()
+    await native.waitFor({ state: 'hidden' })
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true }).hover()
+    assert.equal(await showcase.getByRole('tooltip').count(), 0)
+    await showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true }).click()
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    const choice = fan.locator('[data-node-id="specimen-1"]')
+    await fan.locator('[data-node-id="specimen-0"]').focus()
+    await choice.hover()
+    const hint = fan.locator('[data-slot="tooltip-content"]').filter({ hasText: /^Specimen 2 · Repeater$/ })
+    await hint.waitFor()
+    if (process.env.PULSAS_CAPTURE_HOVER) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/node-hover-fan.png' })
+    await fan.getByRole('button', { name: 'Collapse overlapping nodes', exact: true }).hover()
+    await hint.waitFor({ state: 'hidden' })
+    await fan.locator('[data-node-id="specimen-0"]').focus()
+    await page.keyboard.press('Tab')
+    assert.equal(await choice.evaluate(el => document.activeElement === el), true)
+    await hint.waitFor()
+    await showcase.getByRole('button', { name: 'Long node label', exact: true }).click()
+    await hint.waitFor({ state: 'hidden' })
+    await native.waitFor({ state: 'hidden' })
+    await showcase.getByRole('button', { name: 'Role glyphs', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'roles')
+    await showcase.getByLabel('Role glyphs fixture map', { exact: true }).hover()
+    await native.waitFor()
+    await showcase.getByLabel('Role glyphs fixture map', { exact: true }).evaluate(canvas => canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true })))
+    await showcase.getByRole('button', { name: 'Retry map', exact: true }).waitFor()
+    await native.waitFor({ state: 'hidden' })
+  }, {}, exposeOverlapMap)
+})
+
+for (const [device, options] of [
+  ['desktop', { viewport: { width: 1100, height: 750 }, reducedMotion: 'no-preference' }],
+  ['mobile', { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' }],
+]) test(`eight colocated nodes spread without a visible banner on ${device}`, async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    if (device === 'mobile') {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).click()
+      await page.getByRole('option', { name: 'Overlapping markers', exact: true }).click()
+    } else await showcase.getByRole('button', { name: 'Overlapping markers', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    const stack = showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true })
+    await stack.waitFor()
+    const source = await page.evaluate(async () => window.overlapMap.getSource('markers').getData())
+    assert.equal(source.features.length, 8)
+    assert.equal(new Set(source.features.map(feature => JSON.stringify(feature.geometry.coordinates))).size, 1)
+    await page.evaluate(() => {
+      window.fanFrames = []
+      window.stopFanFrames = false
+      const sample = () => {
+        const positions = [...document.querySelectorAll('.map-overlap-position')]
+        const lines = [...document.querySelectorAll('.map-overlap-connectors line')]
+        if (positions.length) window.fanFrames.push(positions.map((position, i) => ({
+          x: parseFloat(position.style.left), y: parseFloat(position.style.top),
+          lineX: Number(lines[i].getAttribute('x2')), lineY: Number(lines[i].getAttribute('y2')),
+        })))
+        if (!window.stopFanFrames) requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    })
+    await stack.press('Enter')
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.waitFor()
+    await page.waitForFunction(() => document.querySelector('.map-overlap-content[data-overlap-layout="fan"]:not([data-spreading])') && window.fanFrames.length >= 3)
+    assert.equal(await fan.getAttribute('data-overlap-layout'), 'fan')
+    assert.equal(await fan.locator('[data-node-id]').count(), 8)
+    assert.equal(await fan.locator('.map-overlap-caption').count(), 0)
+    for (const text of ['8 overlapping nodes', 'Display offsets only · lines lead to advertised positions']) {
+      const hidden = fan.getByText(text, { exact: true })
+      assert.ok(await hidden.evaluate(el => getComputedStyle(el).clipPath === 'inset(50%)' && el.getBoundingClientRect().width === 1))
+    }
+    const frames = await page.evaluate(() => { window.stopFanFrames = true; return window.fanFrames })
+    const last = frames.at(-1)
+    assert.equal(new Set(last.map(point => `${point.x}:${point.y}`)).size, 8)
+    for (const frame of frames) for (const point of frame) {
+      assert.ok(Math.abs(point.x - point.lineX) < .01 && Math.abs(point.y - point.lineY) < .01, 'connectors follow animated glyph positions')
+    }
+    if (options.reducedMotion === 'reduce') assert.ok(frames.every(frame => JSON.stringify(frame) === JSON.stringify(last)), 'reduced motion has final positions only')
+    else assert.ok(frames.some(frame => {
+      const point = frame[0], target = last[0]
+      return Math.hypot(point.x - target.x, point.y - target.y) > 2 && Math.hypot(point.x - target.x, point.y - target.y) < 80
+    }), 'normal motion includes intermediate spread positions')
+    const bounds = await showcase.locator('.map-preview-stage').boundingBox()
+    const boxes = await fan.locator('[data-node-id]').evaluateAll(nodes => nodes.map(node => {
+      const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }
+    }))
+    for (const a of boxes) {
+      assert.ok(a.width === 44 && a.height === 44)
+      assert.ok(a.x >= bounds.x && a.x + a.width <= bounds.x + bounds.width && a.y >= bounds.y && a.y + a.height <= bounds.y + bounds.height)
+      for (const b of boxes) if (a !== b) assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y)
+    }
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: `../../.tmp/spiderfy-eight-${device}.png` })
+  }, options, exposeOverlapMap)
+})
+
+test('overlap fans support keyboard dismissal, selection through camera motion, and theme changes without moving advertised anchors', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Overlapping markers', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'overlap')
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    const stack = showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true })
+    await stack.waitFor()
+    const before = await page.evaluate(async () => ({ markers: await window.overlapMap.getSource('markers').getData(), zoom: window.overlapMap.getZoom() }))
+    const canvas = showcase.getByLabel('Overlapping markers fixture map', { exact: true })
+    await canvas.press('Enter')
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.waitFor()
+    assert.equal(await fan.locator('[data-node-id]').count(), 8)
+    assert.equal(await fan.locator('.map-overlap-connectors line').count(), 8)
+    assert.equal(await fan.getAttribute('data-overlap-layout'), 'fan')
+    await page.waitForFunction(() => !document.querySelector('.map-overlap-content')?.getAttribute('data-spreading'))
+    assert.equal(await page.evaluate(() => window.overlapMap.getZoom()), before.zoom)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/spiderfy-light.png' })
+    await page.keyboard.press('Escape')
+    await fan.waitFor({ state: 'hidden' })
+    assert.equal(await canvas.evaluate(el => document.activeElement === el), true)
+    await showcase.getByRole('radio', { name: 'Dark', exact: true }).click()
+    await stack.press('Enter')
+    await fan.waitFor()
+    assert.ok(Math.abs(await fan.locator('[data-role="ROOM_SERVER"] svg').first().evaluate(el => el.getBoundingClientRect().width) - 14.4) < .02)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/spiderfy-dark.png' })
+    await page.evaluate(() => { window.overlapCanvas = window.overlapMap.getCanvas(); window.overlapPicks = []; document.addEventListener('map-preview-rendered', e => window.overlapPicks.push(e.detail.raisedIds)) })
+    await fan.getByRole('button', { name: /Specimen 2 · Repeater/ }).click()
+    await fan.waitFor({ state: 'hidden' })
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds.includes('specimen-1') && window.renderedMap.zoom >= 12.5)
+    assert.ok(await showcase.getByText('Selected on map: Specimen 2 · Repeater', { exact: true }).isVisible())
+    const after = await page.evaluate(async () => ({ markers: await window.overlapMap.getSource('markers').getData(), sameCanvas: window.overlapCanvas === window.overlapMap.getCanvas(), picks: window.overlapPicks }))
+    assert.deepEqual(after.markers, before.markers)
+    assert.equal(after.sameCanvas, true)
+    assert.ok(after.picks.every(ids => ids.length === 0 || ids.every(id => id === 'specimen-1')))
+    await canvas.press('Escape')
+    await frameMatching(page, () => window.renderedMap?.raisedIds.length === 0)
+    await stack.click()
+    await fan.waitFor()
+    await canvas.click({ position: { x: 12, y: 100 } })
+    await fan.waitFor({ state: 'hidden' })
+    await stack.click()
+    await fan.waitFor()
+    await page.evaluate(() => window.overlapMap.panBy([20, 0], { duration: 0 }))
+    await fan.waitFor({ state: 'hidden' })
+    await stack.click()
+    await fan.waitFor()
+    await showcase.getByRole('button', { name: 'Long node label', exact: true }).click()
+    await fan.waitFor({ state: 'hidden' })
+  }, { reducedMotion: 'no-preference' }, exposeOverlapMap)
+})
+
+test('near-screen fan and dense chooser stay usable on a 320px touch map', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    // At mobile widths the select is the supported scenario navigation.
+    const selectScenario = async (name) => {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).click()
+      await page.getByRole('option', { name, exact: true }).click()
+    }
+    await selectScenario('Near-overlapping markers')
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    const stack = showcase.getByRole('button', { name: 'Choose 3 overlapping nodes', exact: true })
+    await stack.tap()
+    const fan = showcase.getByRole('dialog', { name: '3 overlapping nodes', exact: true })
+    await fan.waitFor()
+    const bounds = await showcase.locator('.map-preview-stage').boundingBox()
+    for (const button of await fan.locator('[data-node-id]').all()) {
+      const box = await button.boundingBox()
+      assert.ok(box.x >= bounds.x && box.x + box.width <= bounds.x + bounds.width)
+      assert.ok(box.y >= bounds.y && box.y + box.height <= bounds.y + bounds.height)
+    }
+    const anchors = await fan.locator('.map-overlap-connectors line').evaluateAll(lines => lines.map(line => line.getAttribute('x1')))
+    assert.equal(new Set(anchors).size, 3)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/spiderfy-mobile-near.png' })
+    await fan.getByRole('button', { name: /Specimen 3 · Client/ }).tap()
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds.includes('specimen-2'))
+    for (const edge of ['left', 'right', 'bottom']) {
+      await page.evaluate(edge => {
+        const map = window.overlapMap
+        const point = map.project([23.9036, 54.8985])
+        const target = edge === 'left' ? [5, 150] : edge === 'right' ? [map.getCanvas().clientWidth - 5, 150] : [map.getCanvas().clientWidth / 2, map.getCanvas().clientHeight - 5]
+        map.panBy([point.x - target[0], point.y - target[1]], { duration: 0 })
+      }, edge)
+      await stack.tap()
+      await fan.waitFor()
+      const edgeBounds = await showcase.locator('.map-preview-stage').boundingBox()
+      for (const button of await fan.locator('[data-node-id]').all()) {
+        const box = await button.boundingBox()
+        assert.ok(box.x >= edgeBounds.x && box.x + box.width <= edgeBounds.x + edgeBounds.width)
+        assert.ok(box.y >= edgeBounds.y && box.y + box.height <= edgeBounds.y + edgeBounds.height, JSON.stringify({ edge, box, edgeBounds }))
+      }
+      await fan.getByRole('button', { name: 'Collapse overlapping nodes', exact: true }).tap()
+    }
+    await selectScenario('Dense overlapping markers')
+    await showcase.getByRole('button', { name: 'Choose 16 overlapping nodes', exact: true }).tap()
+    const chooser = showcase.getByRole('dialog', { name: '16 overlapping nodes', exact: true })
+    await chooser.waitFor()
+    assert.equal(await chooser.locator('[data-node-id]').count(), 16)
+    assert.equal(await chooser.locator('.map-overlap-connectors line').count(), 0)
+    assert.ok(await chooser.locator('.map-overlap-choices').evaluate(el => el.scrollHeight > el.clientHeight))
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/spiderfy-mobile-dense.png' })
+    await chooser.locator('[data-node-id="specimen-15"]').tap()
+    await frameMatching(page, () => window.renderedMap?.raisedIds.includes('specimen-15'))
+    assert.equal(await chooser.isVisible(), false)
+  }, { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }, exposeOverlapMap)
+})
+
+test('spiderfy leaves ambiguous path evidence intact and repeated appearances count once', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Multiple weak', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'weak-alternatives')
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    // Presentation-only camera zoom makes the existing distinct candidates overlap.
+    await page.evaluate(() => window.overlapMap.jumpTo({ zoom: 8 }))
+    const stack = showcase.getByRole('button', { name: /Choose \d+ overlapping nodes/ }).first()
+    await stack.waitFor()
+    const evidence = () => page.evaluate(async () => ({ markers: await window.overlapMap.getSource('markers').getData(), paths: await window.overlapMap.getSource('paths').getData() }))
+    const before = await evidence()
+    await stack.press('Enter')
+    const fan = showcase.getByRole('dialog', { name: /overlapping nodes/ })
+    await fan.waitFor()
+    assert.ok(await fan.locator('[data-evidence="true"]').count() >= 2)
+    assert.ok(await fan.locator('[data-confidence="weak"]').count() > 0)
+    assert.ok(await fan.locator('.map-overlap-ambiguity').count() > 0)
+    assert.deepEqual(await evidence(), before)
+    await fan.locator('[data-node-id]').first().press('Enter')
+    await fan.waitFor({ state: 'hidden' })
+    assert.deepEqual(await evidence(), before)
+    await showcase.getByRole('button', { name: 'Repeated node', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'repeat')
+    await page.evaluate(() => window.overlapMap.jumpTo({ zoom: 7 }))
+    await showcase.getByRole('button', { name: 'Choose 2 overlapping nodes', exact: true }).press('Enter')
+    const repeated = showcase.getByRole('dialog', { name: '2 overlapping nodes', exact: true })
+    assert.equal(await repeated.locator('[data-node-id]').count(), 2)
+    const ids = await repeated.locator('[data-node-id]').evaluateAll(nodes => nodes.map(node => node.dataset.nodeId))
+    assert.equal(new Set(ids).size, 2)
+    if (process.env.PULSAS_CAPTURE_SPIDERFY) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/spiderfy-evidence.png' })
+  }, {}, exposeOverlapMap)
+})
+
 test('the map renders exact Beacon anchors and a path through a same-origin MapLibre worker', async () => {
   await withMap(async (page, showcase, workers) => {
     const frame = await frameMatching(page, () => window.renderedMap?.pathIds.includes('single-strong') && window.renderedMap)
@@ -93,6 +523,415 @@ test('the map renders exact Beacon anchors and a path through a same-origin MapL
     assert.deepEqual(frame.pathIds, ['single-strong'])
     assert.ok(await showcase.getByText('LT-KM ROOT ED', { exact: true }).first().isVisible())
     assert.ok(await showcase.getByText('LT-KM Vilijampolė FF', { exact: true }).first().isVisible())
+  })
+})
+
+test('zoom buttons render intermediate zoom levels when motion is allowed', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Distant dots', exact: true }).click()
+    const start = await frameMatching(page, () => window.renderedMap?.sceneId === 'dots' && window.renderedMap)
+    await page.evaluate(() => {
+      window.zoomFrames = []
+      document.addEventListener('map-preview-rendered', ({ detail }) => window.zoomFrames.push(detail.zoom))
+    })
+    for (const [name, target] of [['Zoom in', start.zoom + 1], ['Zoom out', start.zoom]]) {
+      await page.evaluate(() => { window.zoomFrames.length = 0 })
+      await showcase.getByRole('button', { name, exact: true }).click()
+      await frameMatching(page, target => Math.abs(window.renderedMap?.zoom - target) < 0.01, target)
+      const frames = await page.evaluate(() => window.zoomFrames)
+      assert.ok(frames.some(zoom => zoom > start.zoom + 0.05 && zoom < start.zoom + 0.95), `${name}: expected an intermediate zoom, got ${frames}`)
+    }
+    const plus = showcase.getByRole('button', { name: 'Zoom in', exact: true })
+    await plus.press('Enter')
+    await plus.press('Enter')
+    await frameMatching(page, target => Math.abs(window.renderedMap?.zoom - target) < 0.01, start.zoom + 2)
+  }, { reducedMotion: 'no-preference' })
+})
+
+test('clicking a node glyph selects it and zooms in', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Role glyphs', exact: true }).click()
+    const start = await frameMatching(page, () => window.renderedMap?.sceneId === 'roles' && window.renderedMap)
+    const canvas = showcase.getByLabel('Role glyphs fixture map', { exact: true })
+    await canvas.click()
+    const selected = await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id) && window.renderedMap, root)
+    assert.ok(selected.zoom >= 12 && selected.zoom > start.zoom, `Expected a close-up, got ${selected.zoom}`)
+    await showcase.getByRole('button', { name: 'Zoom in', exact: true }).click()
+    const closer = await frameMatching(page, zoom => window.renderedMap?.zoom > zoom && window.renderedMap, selected.zoom)
+    await page.evaluate(() => {
+      window.reselectZooms = []
+      document.addEventListener('map-preview-rendered', ({ detail }) => window.reselectZooms.push(detail.zoom))
+    })
+    await canvas.click()
+    assert.ok(await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).isVisible())
+    assert.ok(await page.evaluate(zoom => window.renderedMap.zoom === zoom && window.reselectZooms.every(value => value === zoom), closer.zoom))
+  })
+})
+
+test('evidence names return below their marker after selection motion when there is room', async () => {
+  await withMap(async (page, showcase) => {
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    await showcase.getByRole('button', { name: 'Zoom out', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.zoom === 13.5)
+    await page.evaluate(() => window.placementMap.jumpTo({ zoom: 13.75 }))
+    await showcase.getByRole('button', { name: /LT-KM Vilijampolė FF.*Repeater/ }).click()
+    await frameMatching(page, id => window.renderedMap?.selectedNameplateIds?.includes(id), vilijampole)
+    await page.waitForFunction(() => window.placementMap.loaded() && !window.placementMap.isMoving())
+    await page.evaluate(async () => {
+      const map = window.placementMap
+      for (const x of [-200, -100, -50, 50, 100, 200]) {
+        map.panBy([x, 0], { duration: 0 })
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        map.panBy([-x, 0], { duration: 0 })
+      }
+      map.panBy([100, 0], { duration: 0 })
+    })
+    await page.waitForFunction(() => window.placementMap.loaded() && !window.placementMap.isMoving())
+    const placement = await page.evaluate(() => {
+      const map = window.placementMap
+      return { labels: window.renderedMap.evidenceLabelIds, offsets: map.style.placement.variableOffsets }
+    })
+    assert.deepEqual(placement.labels, [root])
+    if (process.env.PULSAS_CAPTURE_LABEL_PLACEMENT) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/evidence-label-baseline.png' })
+    const layout = await page.evaluate(() => window.placementMap.getLayoutProperty('preview-evidence-name', 'text-anchor'))
+    assert.equal(layout, 'top', 'ROOT name should remain below, not use a retained side anchor')
+    assert.deepEqual(placement.offsets, {}, 'fixed below-only labels must not retain variable side placements')
+    await page.evaluate(id => {
+      const map = window.placementMap
+      const marker = map.querySourceFeatures('markers').find(feature => feature.properties.previewId === id)
+      const point = map.project(marker.geometry.coordinates)
+      map.panBy([0, point.y - (map.getCanvas().clientHeight - 25)], { duration: 0 })
+    }, root)
+    await page.waitForFunction(id => !window.renderedMap.evidenceLabelIds.includes(id), root)
+    await page.evaluate(id => {
+      const map = window.placementMap
+      const marker = map.querySourceFeatures('markers').find(feature => feature.properties.previewId === id)
+      map.jumpTo({ center: marker.geometry.coordinates })
+    }, root)
+    await frameMatching(page, id => window.renderedMap.evidenceLabelIds.includes(id), root)
+  }, { viewport: { width: 1200, height: 850 }, reducedMotion: 'no-preference' }, async page => {
+    await page.route(/\/src\/components\/map\/map-preview\.tsx(?:\?.*)?$/, async route => {
+      const response = await route.fetch()
+      const source = await response.text()
+      assert.ok(source.includes('map = new MapLibre('))
+      await route.fulfill({ response, body: source.replace('map = new MapLibre(', 'map = window.placementMap = new MapLibre(') })
+    })
+  })
+})
+
+test('native names and selected plates omit at mobile edges and return when they fit', async () => {
+  await withMap(async (page, showcase) => {
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    for (const selected of [false, true]) {
+      if (selected) await showcase.getByRole('button', { name: /LT-KM Vilijampolė FF.*Repeater/ }).click()
+      const id = selected ? vilijampole : root
+      for (const edge of ['left', 'right', 'bottom']) {
+        await page.evaluate(({ id, edge }) => {
+          const map = window.placementMap
+          const marker = map.querySourceFeatures('markers').find(feature => feature.properties.previewId === id)
+          map.jumpTo({ center: marker.geometry.coordinates, zoom: 12.5 })
+          const point = map.project(marker.geometry.coordinates)
+          const target = edge === 'left' ? [5, point.y] : edge === 'right' ? [map.getCanvas().clientWidth - 5, point.y] : [point.x, map.getCanvas().clientHeight - 25]
+          map.panBy([point.x - target[0], point.y - target[1]], { duration: 0 })
+        }, { id, edge })
+        await page.waitForFunction(({ id, selected }) => !(selected ? window.renderedMap.selectedNameplateIds : window.renderedMap.evidenceLabelIds).includes(id), { id, selected })
+        await page.waitForFunction(({ id, selected }) => window.placementMap.getFeatureState({ source: selected ? 'preview-chosen' : 'markers', id }).nameOutsideViewport === true, { id, selected })
+        await page.evaluate(id => {
+          const map = window.placementMap
+          map.jumpTo({ center: map.querySourceFeatures('markers').find(feature => feature.properties.previewId === id).geometry.coordinates })
+        }, id)
+        await page.waitForFunction(({ id, selected }) => (selected ? window.renderedMap.selectedNameplateIds : window.renderedMap.evidenceLabelIds).includes(id), { id, selected })
+      }
+    }
+  }, { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }, async page => {
+    await page.route(/\/src\/components\/map\/map-preview\.tsx(?:\?.*)?$/, async route => {
+      const response = await route.fetch()
+      const source = await response.text()
+      await route.fulfill({ response, body: source.replace('map = new MapLibre(', 'map = window.placementMap = new MapLibre(') })
+    })
+  })
+})
+
+test('cluster expansion animates through intermediate zoom levels', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Clusters & counts', exact: true }).click()
+    const start = await frameMatching(page, () => window.renderedMap?.sceneId === 'clusters' && window.renderedMap.clusterCounts.includes(6) && window.renderedMap)
+    await page.evaluate(() => {
+      window.clusterZoomFrames = []
+      document.addEventListener('map-preview-rendered', ({ detail }) => window.clusterZoomFrames.push(detail.zoom))
+    })
+    await showcase.getByRole('button', { name: /Expand cluster.*6 nodes/ }).press('Enter')
+    await frameMatching(page, () => window.renderedMap?.clusterCounts.includes(6) === false)
+    const frames = await page.evaluate(() => window.clusterZoomFrames)
+    const final = Math.max(...frames)
+    assert.ok(frames.some(zoom => zoom > start.zoom + 0.05 && zoom < final - 0.05), `Expected smooth cluster expansion: ${frames}`)
+    assert.ok(frames.every(zoom => zoom >= start.zoom), 'Cluster expansion must not zoom out')
+  }, { reducedMotion: 'no-preference' })
+})
+
+test('cluster expansion skips intermediate zoom frames with reduced motion', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Clusters & counts', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'clusters' && window.renderedMap.clusterCounts.includes(6))
+    await page.evaluate(() => {
+      window.clusterZoomFrames = []
+      document.addEventListener('map-preview-rendered', ({ detail }) => window.clusterZoomFrames.push(detail.zoom))
+    })
+    await showcase.getByRole('button', { name: /Expand cluster.*6 nodes/ }).press('Enter')
+    await frameMatching(page, () => window.renderedMap?.clusterCounts.includes(6) === false)
+    const frames = await page.evaluate(() => window.clusterZoomFrames)
+    assert.equal(new Set(frames).size, 1, `Reduced motion must not animate: ${frames}`)
+  })
+})
+
+test('compact node-state names and selected plates remain below their icons', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Raised selection', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'selected' && window.renderedMap.labelIds.includes('f99f399f-167e-4ac3-ba2a-c950bcf92a89'))
+    await showcase.getByRole('button', { name: /LT-KM ROOT ED.*Repeater/ }).click()
+    await frameMatching(page, id => window.renderedMap?.selectedNameplateIds.includes(id), root)
+    if (process.env.PULSAS_CAPTURE_LABEL_PLACEMENT) await showcase.locator('.map-preview-stage').screenshot({ path: '../../.tmp/node-state-compact-name-gaps.png' })
+    assert.ok(await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).isVisible())
+  }, { viewport: { width: 1200, height: 850 } })
+})
+
+test('selected nameplates follow map, list, and keyboard selection without changing path evidence', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Multiple strong', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'strong-alternatives')
+    await showcase.getByRole('button', { name: /LT-KM Panerys C14A.*Repeater/ }).click()
+    const selected = await frameMatching(page, id => window.renderedMap?.selectedNameplateIds?.includes(id) && window.renderedMap, panerys)
+    assert.deepEqual(selected.selectedNameplateIds, [panerys])
+    assert.ok(selected.ambiguousIds.includes(panerys))
+    assert.equal(selected.hopLabels[panerys], '2')
+    assert.equal(selected.weakPathIds.length, 4)
+    const canvas = showcase.getByLabel('Multiple strong fixture map', { exact: true })
+    await canvas.click()
+    assert.deepEqual(await page.evaluate(() => window.renderedMap.selectedNameplateIds), [panerys])
+    for (const theme of ['Dark', 'Light']) {
+      await showcase.getByRole('radio', { name: theme, exact: true }).click()
+      await showcase.locator(`[data-basemap-state="ready"][data-map-theme="${theme.toLowerCase()}"]`).waitFor()
+      const themed = await frameMatching(page, id => window.renderedMap?.selectedNameplateIds?.includes(id) && window.renderedMap, panerys)
+      assert.equal(themed.zoom, selected.zoom)
+      assert.ok(themed.ambiguousIds.includes(panerys))
+      assert.equal(themed.weakPathIds.length, 4)
+    }
+    await canvas.press('Escape')
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds?.length === 0 && window.renderedMap.raisedIds.length === 0)
+    await canvas.press('Enter')
+    await frameMatching(page, id => window.renderedMap?.selectedNameplateIds?.includes(id), panerys)
+    await showcase.getByRole('button', { name: 'Clear selection', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds?.length === 0)
+    await showcase.getByRole('button', { name: 'Single weak', exact: true }).click()
+    const changed = await frameMatching(page, () => window.renderedMap?.sceneId === 'weak' && window.renderedMap)
+    assert.deepEqual(changed.selectedNameplateIds, [])
+  })
+})
+
+test('selected nameplates handle long names and overlapping nodes on a 320px map', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    const choose = async (name) => {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).click()
+      await page.getByRole('option', { name, exact: true }).click()
+    }
+    await choose('Long node label')
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'long-label')
+    const canvas = showcase.getByLabel('Long node label fixture map', { exact: true })
+    await canvas.press('Enter')
+    await frameMatching(page, () => window.renderedMap?.selectedNameplateIds?.includes('specimen-0'))
+    assert.ok(await showcase.getByText(/Selected on map: Specimen · A deliberately long node label/).isVisible())
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    await choose('Overlapping markers')
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'overlap' && window.renderedMap.selectedNameplateIds.length === 0)
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true }).waitFor()
+    await showcase.getByLabel('Overlapping markers fixture map', { exact: true }).press('Enter')
+    await showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true }).getByRole('button', { name: /Specimen 2 · Repeater/ }).press('Enter')
+    const overlap = await frameMatching(page, () => window.renderedMap?.selectedNameplateIds?.includes('specimen-1') && window.renderedMap)
+    assert.deepEqual(overlap.selectedNameplateIds, ['specimen-1'])
+    assert.ok(overlap.markerIds.includes('specimen-0'))
+  }, { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true })
+})
+
+test('Light and Dark use OpenFreeMap tiles without replacing the selected map', async () => {
+  const requests = []
+  await withMap(async (page, showcase) => {
+    await showcase.locator('[data-basemap-state="ready"]').waitFor()
+    await frameMatching(page, () => window.renderedMap?.pathIds.includes('single-strong'))
+    await showcase.getByRole('button', { name: /LT-KM ROOT ED/ }).click()
+    await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id), root)
+    const canvas = showcase.getByLabel('Single strong fixture map', { exact: true })
+    const original = await canvas.elementHandle()
+    const zoom = await showcase.getByText(/^Zoom \d/).innerText()
+    const light = showcase.getByRole('radio', { name: 'Light', exact: true })
+    const dark = showcase.getByRole('radio', { name: 'Dark', exact: true })
+    await Promise.all([
+      page.waitForResponse(response => response.url() === `${provider}/styles/dark` && response.ok()),
+      light.press('ArrowRight'),
+    ])
+    assert.equal(await dark.getAttribute('aria-checked'), 'true')
+    await showcase.locator('[data-basemap-state="ready"][data-map-theme="dark"]').waitFor()
+    await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id), root)
+    assert.equal(await canvas.evaluate((node, original) => node === original, original), true)
+    assert.equal(await showcase.getByText(/^Zoom \d/).innerText(), zoom)
+    await showcase.getByText('Selected on map: LT-KM ROOT ED', { exact: true }).waitFor()
+    assert.ok(requests.includes('/styles/positron'))
+    assert.ok(requests.includes('/styles/dark'))
+    assert.ok(requests.some(path => path.startsWith('/planet/test/')))
+
+    await showcase.getByRole('button', { name: 'Packet flow', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Loop preview', exact: true }).click()
+    await frameMatching(page, () => window.renderedFlow?.sceneId === 'route' && window.renderedFlow.routes.length > 0)
+    await page.evaluate(() => {
+      window.flowCleared = false
+      document.addEventListener('map-preview-flow-rendered', ({ detail }) => { if (!detail.routes.length) window.flowCleared = true })
+    })
+    await light.click()
+    await showcase.locator('[data-basemap-state="ready"][data-map-theme="light"]').waitFor()
+    assert.equal(await page.evaluate(() => window.flowCleared), false)
+    assert.ok(await showcase.getByRole('button', { name: 'Pause & clear', exact: true }).isVisible())
+  }, {}, undefined, (route, request) => {
+    requests.push(request.pathname)
+    return mockProvider(route, request)
+  })
+})
+
+test('basemap failure keeps evidence visible and retries without replacing the map', async () => {
+  let failed = false
+  await withMap(async (page, showcase) => {
+    const frame = await frameMatching(page, () => window.renderedMap?.pathIds.includes('single-strong') && window.renderedMap)
+    assert.ok(frame.labelIds.includes(root))
+    const retry = showcase.getByRole('button', { name: 'Retry basemap', exact: true })
+    await retry.waitFor()
+    const canvas = showcase.getByLabel('Single strong fixture map', { exact: true })
+    const original = await canvas.elementHandle()
+    await retry.press('Enter')
+    await retry.waitFor({ state: 'hidden' })
+    assert.equal(await canvas.evaluate((node, original) => node === original, original), true)
+    assert.ok(await showcase.getByRole('heading', { name: 'Raw hop chain' }).isVisible())
+  }, {}, undefined, (route, request) => {
+    if (!failed && request.pathname === '/planet') {
+      failed = true
+      return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' } })
+    }
+    return mockProvider(route, request)
+  })
+})
+
+async function assertCompactAttribution(showcase) {
+  const bounds = await showcase.locator('.maplibregl-ctrl-attrib').evaluate(node => {
+    const rect = element => {
+      const { x, y, width, height, right, bottom } = element.getBoundingClientRect()
+      return { x, y, width, height, right, bottom }
+    }
+    const text = document.createRange()
+    text.selectNodeContents(node.querySelector('.maplibregl-ctrl-attrib-inner'))
+    return {
+      strip: rect(node), map: rect(node.closest('.map-preview-canvas')), summary: rect(node.querySelector('summary')),
+      text: rect(text), radius: getComputedStyle(node).borderRadius, margin: getComputedStyle(node).margin,
+    }
+  })
+  assert.ok(Math.abs(bounds.strip.right - bounds.map.right) < 1, 'attribution is flush right')
+  assert.ok(Math.abs(bounds.strip.bottom - bounds.map.bottom) < 1, 'attribution is flush bottom')
+  assert.equal(bounds.radius, '0px')
+  assert.equal(bounds.margin, '0px')
+  assert.ok(bounds.summary.width >= 24 && bounds.summary.height >= 24)
+  const center = box => box.y + box.height / 2
+  assert.ok(Math.abs(center(bounds.summary) - center(bounds.strip)) < 1, 'summary is vertically centered')
+  assert.ok(Math.abs(center(bounds.text) - center(bounds.strip)) <= 2, 'credit text is vertically centered')
+}
+
+test('map copyrights collapse to an info control and reopen for hover and keyboard', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.locator('[data-basemap-state="ready"]').waitFor()
+    const attribution = showcase.locator('.maplibregl-ctrl-attrib')
+    const toggle = attribution.locator('summary')
+    const credits = attribution.locator('.maplibregl-ctrl-attrib-inner')
+    assert.ok(await credits.isVisible())
+    await assertCompactAttribution(showcase)
+    for (const name of ['OpenFreeMap', 'OpenMapTiles', 'OpenStreetMap']) assert.ok((await credits.innerText()).includes(name))
+    await toggle.click()
+    await showcase.getByRole('button', { name: 'Fit example', exact: true }).hover()
+    await credits.waitFor({ state: 'hidden' })
+    const target = await toggle.boundingBox()
+    assert.ok(target.width >= 24 && target.height >= 24)
+    await toggle.hover()
+    await credits.waitFor({ state: 'visible' })
+    await credits.getByRole('link', { name: 'OpenStreetMap', exact: true }).hover()
+    assert.ok(await credits.isVisible())
+    await showcase.getByRole('button', { name: 'Fit example', exact: true }).hover()
+    await credits.waitFor({ state: 'hidden' })
+    await toggle.focus()
+    await toggle.press('Enter')
+    await credits.waitFor({ state: 'visible' })
+    await credits.getByRole('link', { name: 'OpenStreetMap', exact: true }).focus()
+    await page.keyboard.press('Escape')
+    await credits.waitFor({ state: 'hidden' })
+    assert.ok(await toggle.evaluate(node => node === document.activeElement))
+    await toggle.press('Space')
+    await credits.waitFor({ state: 'visible' })
+    await showcase.getByRole('radio', { name: 'Dark', exact: true }).click()
+    await showcase.locator('[data-basemap-state="ready"][data-map-theme="dark"]').waitFor()
+    assert.ok((await credits.innerText()).includes('OpenStreetMap'))
+    assert.equal(await credits.getByRole('link', { name: 'OpenStreetMap', exact: true }).getAttribute('href'), 'https://www.openstreetmap.org/copyright')
+  }, {}, undefined, (route, request) => {
+    if (request.pathname !== '/planet') return mockProvider(route, request)
+    return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: {
+      tilejson: '3.0.0', tiles: [`${provider}/planet/test/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14,
+      attribution: providerAttribution,
+    } })
+  })
+})
+
+test('touch can toggle complete map credits without overflowing a 320px map', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.locator('[data-basemap-state="ready"]').waitFor()
+    const attribution = showcase.locator('.maplibregl-ctrl-attrib')
+    const toggle = attribution.locator('summary')
+    const credits = attribution.locator('.maplibregl-ctrl-attrib-inner')
+    await credits.waitFor({ state: 'visible' })
+    await toggle.tap()
+    await credits.waitFor({ state: 'hidden' })
+    await toggle.tap()
+    await credits.waitFor({ state: 'visible' })
+    const outer = await showcase.locator('.map-preview-stage').boundingBox()
+    await assertCompactAttribution(showcase)
+    const inner = await attribution.boundingBox()
+    assert.ok(inner.x >= outer.x && inner.x + inner.width <= outer.x + outer.width + 1)
+    assert.ok((await credits.innerText()).includes('OpenStreetMap'))
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  }, { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }, undefined, (route, request) => {
+    if (request.pathname !== '/planet') return mockProvider(route, request)
+    return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: {
+      tilejson: '3.0.0', tiles: [`${provider}/planet/test/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14,
+      attribution: providerAttribution,
+    } })
+  })
+})
+
+test('path evidence keeps its names at a zoom that hides ordinary node names', async () => {
+  await withMap(async (page, showcase) => {
+    await frameMatching(page, () => window.renderedMap?.pathIds.includes('single-strong'))
+    const zoomOut = showcase.getByRole('button', { name: 'Zoom out', exact: true })
+    const zoom = showcase.getByText(/^Zoom \d/)
+    const level = async () => Number((await zoom.innerText()).match(/\d+(?:\.\d+)?/)[0])
+    let frame
+    for (let count = 0; count < 4 && await level() >= 11.5; count++) {
+      const before = await zoom.innerText()
+      await page.evaluate(() => { delete window.renderedMap })
+      await zoomOut.click()
+      await page.waitForFunction(({ node, text }) => node.innerText !== text, { node: await zoom.elementHandle(), text: before })
+      frame = await frameMatching(page, () => window.renderedMap?.sceneId === 'strong' && window.renderedMap)
+    }
+    assert.ok(await level() < 11.5)
+    assert.ok(frame.labelIds.includes(root))
+    assert.equal(frame.hopLabels[root], '1')
   })
 })
 
@@ -108,6 +947,11 @@ test('every path example renders only its supported nodes, links, and schematic 
       assert.deepEqual(frame.gapIds.sort(), gaps, name)
       assert.equal(frame.strongPathIds.length, strong, name)
       assert.equal(frame.weakPathIds.length, weak, name)
+      assert.deepEqual(frame.weakPathHaloIds.sort(), frame.weakPathIds.sort(), name)
+      if (sceneId === 'consecutive-missing') {
+        assert.deepEqual(frame.gapPrefixes, { 'gap-2': 'e1e1e1', 'gap-3': 'e2e2e2' })
+        assert.deepEqual(frame.gapHopLabels, { 'gap-2': '2', 'gap-3': '3' })
+      }
       if (sceneId === 'repeat') {
         assert.equal(frame.hopLabels[root], '1, 3')
         assert.ok(await showcase.getByText(/^Hop 1, 3\b/).isVisible())
@@ -132,11 +976,18 @@ test('hiding an alternative keeps the raw evidence ambiguous and selecting it re
     assert.equal(filtered.strongPathIds.length, 0)
     assert.equal(filtered.weakPathIds.length, 2)
     assert.deepEqual(filtered.ambiguousIds, [vilijampole])
+    const remaining = showcase.getByRole('checkbox', { name: /LT-KM Vilijampolė FF/ })
+    assert.ok(await remaining.isDisabled())
+    assert.equal(await remaining.getAttribute('aria-checked'), 'true')
+    assert.ok(await showcase.getByText(/keep at least one located candidate/i).isVisible())
     const rawHop = showcase.getByRole('button', { name: /Hop 2.*7d8e31/i })
     await rawHop.press('Enter')
     await page.getByRole('dialog', { name: /Hop 2.*7d8e31/i }).getByRole('button', { name: /LT-KM Panerys C14A/ }).click()
-    await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id), panerys)
+    const raised = await frameMatching(page, id => window.renderedMap?.raisedIds.includes(id) && window.renderedMap, panerys)
+    assert.ok(raised.ambiguousIds.includes(panerys))
+    assert.equal(raised.hopLabels[panerys], '2')
     assert.equal(await candidate.getAttribute('aria-checked'), 'true')
+    assert.ok(await remaining.isEnabled())
     assert.ok(await showcase.getByText(/Selected on map: LT-KM Panerys/).isVisible())
   })
 })
@@ -171,9 +1022,12 @@ test('node comparisons change real zoom layers, expand clusters, and resolve ove
     const specimens = await choose('Every role & fallback', 'role-specimens')
     assert.equal(specimens.roleIds.length, 7)
     await choose('Overlapping markers', 'overlap')
-    await showcase.getByLabel('Overlapping markers fixture map', { exact: true }).click()
-    await showcase.getByText('2 markers overlap.', { exact: false }).waitFor()
-    await showcase.getByRole('button', { name: /Specimen 2 · Repeater/ }).press('Enter')
+    await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true }).waitFor()
+    await showcase.getByLabel('Overlapping markers fixture map', { exact: true }).press('Enter')
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.waitFor()
+    await fan.getByRole('button', { name: /Specimen 2 · Repeater/ }).press('Enter')
     await frameMatching(page, () => window.renderedMap?.raisedIds.includes('specimen-1'))
     const long = await choose('Long node label', 'long-label')
     assert.ok(long.labelIds.includes('specimen-0'))
@@ -350,7 +1204,62 @@ test('the UI SDK agent can discover map controls, choose a scenario, and change 
     }, actions.clear)
     assert.equal(clear.ok, true, clear.error?.message)
     await frameMatching(page, () => window.renderedFlow?.routes.length === 0)
-  }, { viewport: { width: 390, height: 780 }, reducedMotion: 'no-preference' }, async page => {
+  }, { viewport: { width: 390, height: 780 }, reducedMotion: 'no-preference' }, page => prepareMapAgent(page, t))
+})
+
+test('the UI SDK agent discovers an overlap count and selects a node through the fan', async (t) => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).waitFor()
+    const overlapSetup = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const press = async text => {
+        const controls = await agent.query({ text })
+        const control = controls.find(control => control.label === text)
+        return control && agent.act({ steps: [{ ref: control.ref, action: 'press' }] })
+      }
+      const mode = await press('Node states')
+      if (!mode?.ok) return mode
+      const selectors = await agent.query({ within: 'Scenario' })
+      const selector = selectors.find(control => control.label === 'Scenario')
+      const overlap = selector?.items?.find(item => item.label === 'Overlapping markers')
+      return overlap && agent.act({ steps: [{ ref: selector.ref, action: 'setValue', args: [overlap.value] }] })
+    })
+    assert.equal(overlapSetup?.ok, true, overlapSetup?.error?.message ?? 'Overlap scenario not discovered')
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'overlap' && window.renderedMap.raisedIds.length === 0)
+    assert.equal(await showcase.getByRole('button', { name: 'Spiderfy', exact: true }).getAttribute('aria-pressed'), 'false')
+    const enabled = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const controls = await agent.query({ text: 'Spiderfy' })
+      const toggle = controls.find(control => control.label === 'Spiderfy')
+      return toggle && agent.act({ steps: [{ ref: toggle.ref, action: 'press' }] })
+    })
+    assert.equal(enabled?.ok, true, enabled?.error?.message ?? 'Spiderfy toggle not discovered')
+    await showcase.getByRole('button', { name: 'Choose 8 overlapping nodes', exact: true }).waitFor()
+    const opened = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const controls = await agent.query({ text: 'Choose 8 overlapping nodes' })
+      const trigger = controls.find(control => control.label === 'Choose 8 overlapping nodes')
+      return trigger && agent.act({ steps: [{ ref: trigger.ref, action: 'press' }] })
+    })
+    assert.equal(opened?.ok, true, opened?.error?.message ?? 'Overlap count not discovered')
+    const fan = showcase.getByRole('dialog', { name: '8 overlapping nodes', exact: true })
+    await fan.waitFor()
+    const picked = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const controls = await agent.query({ text: 'Specimen 2 · Repeater · Repeater' })
+      const choice = controls.find(control => control.label === 'Specimen 2 · Repeater · Repeater')
+      return choice && agent.act({ steps: [{ ref: choice.ref, action: 'press' }] })
+    })
+    assert.equal(picked?.ok, true, picked?.error?.message ?? 'Fan node not discovered')
+    const selected = await frameMatching(page, () => window.renderedMap?.selectedNameplateIds.includes('specimen-1') && window.renderedMap)
+    assert.deepEqual(selected.raisedIds, ['specimen-1'])
+    assert.deepEqual(selected.selectedNameplateIds, ['specimen-1'])
+    await fan.waitFor({ state: 'hidden' })
+    assert.ok(await showcase.getByText('Selected on map: Specimen 2 · Repeater', { exact: true }).isVisible())
+  }, { viewport: { width: 390, height: 780 }, reducedMotion: 'no-preference' }, page => prepareMapAgent(page, t))
+})
+
+async function prepareMapAgent(page, t) {
     const source = await page.request.get(`${origin}/src/main.tsx`)
     if (!source.headers()['content-type']?.includes('javascript')) {
       t.skip('The agent harness is a Vite development module')
@@ -359,9 +1268,8 @@ test('the UI SDK agent can discover map controls, choose a scenario, and change 
     await page.route(url, async route => {
       const response = await route.fetch()
       const html = await response.text()
-      const body = html.replace('src="/src/main.tsx"', 'src="/tests/kitchen-sink-agent.mjs"')
+      const body = html.replace(/src="\/src\/main\.tsx(?:\?[^"]*)?"/, 'src="/tests/kitchen-sink-agent.mjs"')
       assert.notEqual(body, html)
       await route.fulfill({ response, body })
     })
-  })
-})
+}

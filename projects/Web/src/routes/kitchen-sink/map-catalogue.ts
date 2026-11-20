@@ -1,14 +1,11 @@
 import type { MapPreviewScene } from '../../components/map/map-preview'
+import { pathScene, type EvidenceAnchor as Anchor, type EvidenceHop, type EvidenceMatch as Match } from '../../components/map/map-path-evidence'
 import type { NodeRole } from '../../components/nodes/node-role'
 import type { PacketPathHop } from '../../components/packets/packet-path-chain'
 import { mapAnchors, mapShowcaseCenter, unlocatedMapAnchor } from './map-fixtures'
 
 type Position = readonly [number, number]
-type Anchor = { id: string; name: string; role: NodeRole; coordinates: Position | null; publicKey: string }
-type Match = { anchor: Anchor; confidence: 'Strong' | 'Weak' }
-type EvidenceHop = { prefix: string; matches: readonly Match[] }
 type Marker = MapPreviewScene['markers'][number]
-type Line = MapPreviewScene['paths'][number]
 type Flow = { id: string; stops: readonly { id: string; name: string; coordinates: Position; schematic?: boolean }[] }
 
 export type MapExample = {
@@ -45,8 +42,14 @@ const nodeExamples: readonly MapExample[] = [
   nodes('clusters', 'Clusters & counts', 'Nearby nodes group into counted circles. Select a cluster to expand it.', mapAnchors, { zoom: 8, clustered: true }),
   nodes('role-specimens', 'Every role & fallback', 'Generated specimens for the shared role artwork and both unknown-role fallbacks.',
     roleSamples.map((role, index) => specimen(role, index, [longitude + (index % 3 - 1) * .014, latitude + (1 - Math.floor(index / 3)) * .01]))),
-  nodes('overlap', 'Overlapping markers', 'Two specimens share one coordinate. Pick the overlap to see both choices.',
-    roleSamples.slice(0, 2).map((role, index) => specimen(role, index, mapShowcaseCenter))),
+  nodes('overlap', 'Overlapping markers', 'Eight specimens share one advertised coordinate. Pick the overlap to spread them out.',
+    Array.from({ length: 8 }, (_, index) => ({ ...specimen(roleSamples[index % roleSamples.length], index, mapShowcaseCenter),
+      name: `Specimen ${index + 1} · ${roleSamples[index % roleSamples.length].name}` }))),
+  nodes('near-overlap', 'Near-overlapping markers', 'Distinct advertised positions overlap on screen. Display connectors keep each anchor separate.',
+    roleSamples.slice(0, 3).map((role, index) => specimen(role, index, [longitude + index * .00012, latitude])), { zoom: 13 }),
+  nodes('dense-overlap', 'Dense overlapping markers', 'A bounded chooser keeps every node available when a fan would be crowded.',
+    Array.from({ length: 16 }, (_, index) => ({ ...specimen(roleSamples[index % roleSamples.length], index, mapShowcaseCenter),
+      name: `Dense specimen ${index + 1} · ${roleSamples[index % roleSamples.length].name}` }))),
   nodes('long-label', 'Long node label', 'Inspect placement and wrapping without changing the advertised names of the snapshot nodes.',
     [{ ...specimen(roleSamples[0], 0, mapShowcaseCenter), name: 'Specimen · A deliberately long node label to inspect wrapping, collision placement and selected-label visibility' }]),
 ]
@@ -56,60 +59,6 @@ const hop = (anchor: Anchor, confidence?: Match['confidence']): EvidenceHop => (
 const gap = (prefix: string): EvidenceHop => ({ prefix, matches: [] })
 const alternative = (first: Match['confidence'], second: Match['confidence']): EvidenceHop => ({ prefix: b.publicKey.slice(0, 6), matches: [match(b, first), match(c, second)] })
 const positionBetween = (from: Position, to: Position, fraction: number): Position => [from[0] + (to[0] - from[0]) * fraction, from[1] + (to[1] - from[1]) * fraction]
-
-type LocatedMatch = Match & { anchor: Anchor & { coordinates: Position } }
-const located = (match: Match): match is LocatedMatch => match.anchor.coordinates !== null
-
-function centerOf(matches: readonly LocatedMatch[]): Position {
-  return [matches.reduce((sum, match) => sum + match.anchor.coordinates[0], 0) / matches.length,
-    matches.reduce((sum, match) => sum + match.anchor.coordinates[1], 0) / matches.length]
-}
-
-export function pathScene(hops: readonly EvidenceHop[], hiddenKeys: ReadonlySet<string> = new Set(), id = 'path'): MapPreviewScene {
-  const markers = new Map<string, Marker>()
-  const paths: Line[] = []
-  let previous: { index: number; matches: readonly LocatedMatch[]; solid: boolean } | undefined
-  function connect(from: Position, to: Position, solid: boolean) {
-    if (from[0] !== to[0] || from[1] !== to[1]) paths.push({ id: paths.length === 0 ? id : `${id}-${paths.length + 1}`, coordinates: [from, to], confidence: solid ? 'strong' : 'weak' })
-  }
-  for (const [index, step] of hops.entries()) {
-    const visible = step.matches.filter(({ anchor }) => !hiddenKeys.has(`${index}:${anchor.id}`))
-    const strong = step.matches.filter(({ confidence }) => confidence === 'Strong')
-    const selected = strong.length === 1 ? strong[0] : undefined
-    for (const { anchor, confidence } of visible.filter(located)) {
-      const existing = markers.get(anchor.id)
-      const ambiguous = Boolean(existing?.ambiguous || step.matches.length > 1)
-      markers.set(anchor.id, {
-        id: anchor.id, coordinates: anchor.coordinates, name: anchor.name, role: anchor.role,
-        label: existing ? `${existing.label}, ${index + 1}` : String(index + 1),
-        confidence: existing?.confidence === 'strong' || (selected?.anchor.id === anchor.id && confidence === 'Strong') ? 'strong' : 'weak',
-        ambiguous,
-      })
-    }
-    // Explicit display choices can draw other possible links, but cannot establish a strong match.
-    const matches = (visible.length === step.matches.length && strong.length ? strong : visible).filter(located)
-    const solid = matches.length === 1 && matches[0] === selected
-    if (!matches.length) continue
-    if (previous && previous.index === index - 1) {
-      for (const from of previous.matches) for (const to of matches) connect(from.anchor.coordinates, to.anchor.coordinates, previous.solid && solid)
-    } else if (previous) {
-      const start = centerOf(previous.matches), end = centerOf(matches)
-      let last: Position | undefined
-      for (let between = previous.index + 1; between < index; between += 1) {
-        if (hops[between]!.matches.some(located)) continue
-        const coordinates = positionBetween(start, end, (between - previous.index) / (index - previous.index))
-        const gapId = `gap-${between + 1}`
-        markers.set(gapId, { id: gapId, coordinates, label: `${between + 1} · ${hops[between]!.prefix}`, presentation: 'gap' })
-        if (last) connect(last, coordinates, false)
-        else for (const from of previous.matches) connect(from.anchor.coordinates, coordinates, false)
-        last = coordinates
-      }
-      if (last) for (const to of matches) connect(last, to.anchor.coordinates, false)
-    }
-    previous = { index, matches, solid }
-  }
-  return { markers: [...markers.values()], paths }
-}
 
 function evidence(id: string, label: string, description: string, steps: readonly EvidenceHop[]): MapExample {
   return {

@@ -69,9 +69,13 @@ using a 20 November 2026 [Beacon](https://beacon.atvirastinklas.lt) snapshot: th
 six nearest located KUN nodes within 100 km of the Kaunas showcase center, plus
 one node without a location. Node names, public keys, and advertised coordinates
 are preserved. Role specimens, candidate matches, and packet activity are
-generated examples, not reception evidence. The MapLibre map uses a bundled
-worker and a schematic background; it requests no external map tiles or registry
-data. The showcase does not connect to Gateway.
+generated examples, not reception evidence. The shared path renderer shows
+solid links between uniquely strong matches, dashed alternatives, and numbered
+schematic gaps without inventing node locations. The MapLibre map uses a bundled
+worker and loads the geographic background from [OpenFreeMap](https://openfreemap.org/)
+when the map opens: Positron for Light and the OpenFreeMap Dark style for Dark.
+If the provider is unavailable, the fixture overlays still work on a schematic
+background. The showcase does not connect to Gateway or a live node registry.
 The local Web resource is not published.
 
 With the Web resource running, use `mise exec -- npm run test:browser` from

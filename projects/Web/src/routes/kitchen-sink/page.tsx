@@ -234,7 +234,7 @@ function MapExamplesSection() {
           <h2 id="ks-map-heading">Map examples</h2>
           <p>Inspect node markers using a Beacon directory snapshot near Kaunas, then explore generated paths and packet flow. The examples don’t show live reception.</p>
         </div>
-        <span className="ks-fixture-label">Beacon snapshot · Offline</span>
+        <span className="ks-fixture-label">Beacon snapshot</span>
       </header>
       {requested && <Suspense fallback={<p className="ks-map-pending" role="status">Loading map examples…</p>}><MapSpecimens /></Suspense>}
     </section>

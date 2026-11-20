@@ -14,16 +14,13 @@
   --ks-mark-fill: var(--ks-paper);
 }
 
-[data-tone='neutral'] { --ks-tone-fill: #eef2f1; --ks-tone-ink: #42514c; }
-[data-tone='green'] { --ks-tone-fill: #e5f4eb; --ks-tone-ink: #1d5c43; }
-[data-tone='violet'] { --ks-tone-fill: #f0eaf9; --ks-tone-ink: #574184; }
-[data-tone='blue'] { --ks-tone-fill: #e7f0fa; --ks-tone-ink: #294e7e; }
-[data-tone='amber'] { --ks-tone-fill: #faf0dc; --ks-tone-ink: #684a15; }
-[data-theme='dark'] [data-tone='neutral'] { --ks-tone-fill: #2c3d37; --ks-tone-ink: #d7e6df; }
-[data-theme='dark'] [data-tone='green'] { --ks-tone-fill: #233f34; --ks-tone-ink: #a9e2c3; }
-[data-theme='dark'] [data-tone='violet'] { --ks-tone-fill: #3a2e50; --ks-tone-ink: #dec8ff; }
-[data-theme='dark'] [data-tone='blue'] { --ks-tone-fill: #293d55; --ks-tone-ink: #bddaff; }
-[data-theme='dark'] [data-tone='amber'] { --ks-tone-fill: #4a3823; --ks-tone-ink: #f7d38c; }
+[data-tone] { --ks-tone-fill: var(--ks-tone-light-fill); --ks-tone-ink: var(--ks-tone-light-ink); }
+[data-tone='neutral'] { --ks-tone-light-fill: #eef2f1; --ks-tone-light-ink: #42514c; --ks-tone-dark-fill: #2c3d37; --ks-tone-dark-ink: #d7e6df; }
+[data-tone='green'] { --ks-tone-light-fill: #e5f4eb; --ks-tone-light-ink: #1d5c43; --ks-tone-dark-fill: #233f34; --ks-tone-dark-ink: #a9e2c3; }
+[data-tone='violet'] { --ks-tone-light-fill: #f0eaf9; --ks-tone-light-ink: #574184; --ks-tone-dark-fill: #3a2e50; --ks-tone-dark-ink: #dec8ff; }
+[data-tone='blue'] { --ks-tone-light-fill: #e7f0fa; --ks-tone-light-ink: #294e7e; --ks-tone-dark-fill: #293d55; --ks-tone-dark-ink: #bddaff; }
+[data-tone='amber'] { --ks-tone-light-fill: #faf0dc; --ks-tone-light-ink: #684a15; --ks-tone-dark-fill: #4a3823; --ks-tone-dark-ink: #f7d38c; }
+[data-theme='dark'] [data-tone] { --ks-tone-fill: var(--ks-tone-dark-fill); --ks-tone-ink: var(--ks-tone-dark-ink); }
 
 .ks-glyph { display: block; flex: none; inline-size: 1rem; block-size: 1rem; }
 .ks-mesh-mark, .ks-lucide-glyph { display: block; flex: none; }

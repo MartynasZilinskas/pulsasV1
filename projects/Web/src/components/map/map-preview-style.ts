@@ -1,14 +1,21 @@
-import type { FilterSpecification, Map as MapLibre, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl'
+import type { ExpressionSpecification, FilterSpecification, Map as MapLibre, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl'
 import { nodeRoles, type NodeRole } from '../nodes/node-role'
+import type { MapPreviewTheme } from './map-preview-basemap-style'
 
 export const markerLayer = 'preview-marker'
 export const gapLayer = 'preview-gap'
+export const gapHopLayer = 'preview-gap-hop'
 export const pathLayer = 'preview-path'
+export const weakPathHaloLayer = 'preview-path-weak-halo'
 export const weakPathLayer = 'preview-path-weak'
 export const clusterLayer = 'preview-cluster'
 export const roleLayer = 'preview-role'
 export const labelLayer = 'preview-name'
+export const evidenceLabelLayer = 'preview-evidence-name'
 export const raisedLayer = 'preview-raised'
+export const raisedLabelLayer = 'preview-raised-label'
+export const raisedHopLayer = 'preview-raised-hop'
+export const raisedAmbiguousLayer = 'preview-raised-ambiguous'
 export const hopLayer = 'preview-hop-number'
 export const ambiguousLayer = 'preview-ambiguous'
 export const chosenSource = 'preview-chosen'
@@ -19,122 +26,259 @@ export const roleZoom = 9
 export const labelZoom = 12
 export const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-const strongColor = '#165e47'
-const weakColor = '#8b5719'
-const flowColor = '#a24319'
-const ink = '#24342c'
+const palettes = {
+  light: { strong: '#165e47', weak: '#8b5719', flow: '#a24319', ink: '#24342c', casing: '#ffffff', gap: '#fffaf1' },
+  dark: { strong: '#92e4bc', weak: '#ffca82', flow: '#ff9f78', ink: '#edf4ee', casing: '#17211f', gap: '#2b2318' },
+}
 const white = '#fff'
-const roleImageSize = 36
+const roleImageSize = 54
+const nameSize = 12
+const roleGlyphLayout: SymbolLayerSpecification['layout'] = {
+  'icon-image': ['get', 'roleImage'],
+  'icon-size': ['match', ['get', 'roleImage'], ['node-role-CLIENT', 'node-role-ROOM_SERVER'], 0.8, 1],
+  'icon-allow-overlap': true, 'icon-ignore-placement': true,
+}
 const isWeak = ['==', ['get', 'confidence'], 'weak'] satisfies FilterSpecification
 const isGap = ['==', ['get', 'presentation'], 'gap'] satisfies FilterSpecification
 const isNode = ['all', ['!', isGap], ['!', ['has', 'point_count']]] satisfies FilterSpecification
-const roleColors = { ROOM_SERVER: '#225e45', REPEATER: '#594480', CLIENT: '#30587e', SENSOR: '#74531c', NONE: '#54635b' } satisfies Record<NodeRole, string>
-const textPaint = { 'text-color': ink, 'text-halo-color': white, 'text-halo-width': 1.7 }
+const isEvidence = ['has', 'confidence'] satisfies FilterSpecification
+const isCandidate = ['all', isNode, isEvidence] satisfies FilterSpecification
+const isOrdinaryNode = ['all', isNode, ['!', isEvidence]] satisfies FilterSpecification
+const isAmbiguous = ['==', ['get', 'ambiguous'], true] satisfies FilterSpecification
 const nameLayout: SymbolLayerSpecification['layout'] = {
-  'text-field': ['get', 'name'], 'text-font': ['sans-serif'], 'text-size': 12,
-  'text-anchor': 'top', 'text-offset': [0, 1.25], 'text-max-width': 14, 'text-padding': 4,
+  'text-field': ['get', 'name'], 'text-font': ['sans-serif'], 'text-size': nameSize,
+  'text-anchor': 'top', 'text-max-width': 14, 'text-padding': 4,
+  'text-offset': [0, 15 / 12],
 }
+const evidenceNameLayout: SymbolLayerSpecification['layout'] = {
+  'text-field': ['get', 'name'], 'text-font': ['sans-serif'], 'text-size': nameSize,
+  'text-anchor': 'top', 'text-offset': ['step', ['zoom'], ['literal', [0, 1.65]], roleZoom, ['literal', [0, 20 / 12]]],
+  'text-justify': 'center', 'text-max-width': 14, 'text-padding': 3,
+}
+const hopLayout: SymbolLayerSpecification['layout'] = {
+  'text-field': ['get', 'hopLabel'], 'text-font': ['sans-serif'], 'text-size': 12,
+  'text-anchor': 'center', 'text-offset': ['step', ['zoom'],
+    ['literal', [0, -11.25 / 12]], roleZoom, ['literal', [0, -13.75 / 12]]],
+  'text-allow-overlap': true,
+}
+const ambiguityLayout: SymbolLayerSpecification['layout'] = {
+  'text-field': '?', 'text-font': ['sans-serif'], 'text-size': 14,
+  'text-offset': ['step', ['zoom'],
+    ['literal', [11.25 / 14, 0]], roleZoom, ['literal', [13.75 / 14, 0]]],
+  'text-allow-overlap': true,
+}
+const lineWidth = 4
+const casingWidth = 8
+const possibleDashes = [8, 6]
 
-export function offlineStyle(): StyleSpecification {
+export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecification {
+  const { strong: strongColor, weak: weakColor, flow: flowColor, ink, casing } = palettes[theme]
+  const roleInk = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], strongColor] satisfies ExpressionSpecification
+  const roleFill = ['coalesce', ['get', theme === 'dark' ? 'roleDarkFill' : 'roleFill'], strongColor] satisfies ExpressionSpecification
+  const roleEdge = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], white] satisfies ExpressionSpecification
+  const compactRoleFace = {
+    'circle-radius': 9, 'circle-color': roleFill,
+    'circle-stroke-color': roleEdge, 'circle-stroke-width': 1,
+  }
+  const themedRoleGlyphLayout: SymbolLayerSpecification['layout'] = {
+    ...roleGlyphLayout, 'icon-image': theme === 'dark' ? ['concat', ['get', 'roleImage'], '-dark'] : ['get', 'roleImage'],
+  }
+  const textPaint = { 'text-color': ink, 'text-halo-color': casing, 'text-halo-width': 1.7 }
+  const nameOpacity = ['case', ['boolean', ['feature-state', 'nameOutsideViewport'], false], 0, 1] satisfies ExpressionSpecification
+  const confidenceInk = ['case', isWeak, weakColor, strongColor] as const
   return {
     version: 8,
+    transition: { duration: 0, delay: 0 },
     sources: {
       markers: { type: 'geojson', promoteId: previewId, data: empty, cluster: false, clusterRadius: 45, clusterMaxZoom: 12 },
       paths: { type: 'geojson', data: empty },
-      [chosenSource]: { type: 'geojson', data: empty },
+      [chosenSource]: { type: 'geojson', promoteId: previewId, data: empty },
       [flowSource]: { type: 'geojson', data: empty },
     },
     layers: [
-      { id: 'path-halo', source: 'paths', type: 'line', filter: ['!', isWeak], layout: { 'line-cap': 'round' }, paint: { 'line-color': white, 'line-width': 8 } },
-      { id: pathLayer, source: 'paths', type: 'line', filter: ['!', isWeak], layout: { 'line-cap': 'round' }, paint: { 'line-color': strongColor, 'line-width': 4 } },
-      { id: weakPathLayer, source: 'paths', type: 'line', filter: isWeak, paint: { 'line-color': weakColor, 'line-width': 4, 'line-dasharray': [2, 1.5] } },
+      // Dash units are multiples of stroke width; the casing and ink share the same pixel pattern.
+      { id: weakPathHaloLayer, source: 'paths', type: 'line', filter: isWeak, layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: {
+        'line-color': casing, 'line-width': casingWidth, 'line-dasharray': possibleDashes.map((length) => length / casingWidth),
+      } },
+      { id: weakPathLayer, source: 'paths', type: 'line', filter: isWeak, layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: {
+        'line-color': weakColor, 'line-width': lineWidth, 'line-dasharray': possibleDashes.map((length) => length / lineWidth),
+      } },
+      { id: 'path-halo', source: 'paths', type: 'line', filter: ['!', isWeak], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': casing, 'line-width': casingWidth } },
+      { id: pathLayer, source: 'paths', type: 'line', filter: ['!', isWeak], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': strongColor, 'line-width': lineWidth } },
       { id: 'preview-flow-trail', source: flowSource, type: 'line', filter: ['==', ['get', 'kind'], 'trail'], paint: {
         'line-color': flowColor, 'line-opacity': ['get', 'opacity'], 'line-width': 3, 'line-dasharray': [2, 1.5],
       } },
       { id: clusterLayer, source: 'markers', type: 'circle', filter: ['has', 'point_count'], paint: {
-        'circle-radius': 17, 'circle-color': strongColor, 'circle-stroke-color': white, 'circle-stroke-width': 2,
+        'circle-radius': 17, 'circle-color': strongColor, 'circle-stroke-color': casing, 'circle-stroke-width': 2,
       } },
       { id: 'preview-cluster-count', source: 'markers', type: 'symbol', filter: ['has', 'point_count'], layout: {
         'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['sans-serif'], 'text-size': 13, 'text-allow-overlap': true, 'text-ignore-placement': true,
-      }, paint: { 'text-color': white } },
+      }, paint: { 'text-color': theme === 'dark' ? casing : white } },
+      { id: 'preview-confidence-ring', source: 'markers', type: 'circle', filter: isCandidate, paint: {
+        'circle-radius': ['step', ['zoom'], 10, roleZoom, 12.5], 'circle-color': casing,
+        'circle-stroke-color': [...confidenceInk], 'circle-stroke-width': 2.5,
+      } },
+      // Keep generous hit areas in the role band, where a separate layer draws the smaller face.
       { id: markerLayer, source: 'markers', type: 'circle', filter: isNode, paint: {
-        'circle-radius': ['step', ['zoom'], ['case', ['has', 'confidence'], 13, 5], 9, 13],
-        'circle-color': ['coalesce', ['get', 'color'], strongColor],
-        'circle-stroke-color': ['case', ['==', ['get', 'confidence'], 'weak'], '#d79532', white],
-        'circle-stroke-width': 2,
+        'circle-radius': ['step', ['zoom'], ['case', isEvidence, 6, 5], roleZoom, ['case', isEvidence, 16, 18]],
+        'circle-color': ['step', ['zoom'], roleInk, roleZoom, roleFill],
+        'circle-stroke-color': ['step', ['zoom'], white, roleZoom, roleEdge],
+        'circle-stroke-width': ['case', isEvidence, 0, 2],
+        'circle-opacity': ['step', ['zoom'], 1, roleZoom, 0], 'circle-stroke-opacity': ['step', ['zoom'], 1, roleZoom, 0],
       } },
-      { id: roleLayer, source: 'markers', type: 'symbol', minzoom: roleZoom, filter: ['all', isNode, ['has', 'roleImage']], layout: {
-        'icon-image': ['get', 'roleImage'], 'icon-allow-overlap': true, 'icon-ignore-placement': true,
-      } },
-      { id: labelLayer, source: 'markers', type: 'symbol', minzoom: labelZoom, filter: isNode, layout: nameLayout, paint: textPaint },
-      { id: hopLayer, source: 'markers', type: 'symbol', filter: ['all', isNode, ['has', 'confidence']], layout: {
-        'text-field': ['get', 'hopLabel'], 'text-font': ['sans-serif'], 'text-size': 12,
-        'text-anchor': 'bottom', 'text-offset': [0, -1.3], 'text-allow-overlap': true, 'text-ignore-placement': true,
-      }, paint: textPaint },
-      { id: ambiguousLayer, source: 'markers', type: 'symbol', filter: ['all', isNode, ['==', ['get', 'ambiguous'], true]], layout: {
-        'text-field': '?', 'text-font': ['sans-serif'], 'text-size': 14,
-        'text-offset': [1.25, 0], 'text-allow-overlap': true, 'text-ignore-placement': true,
-      }, paint: { ...textPaint, 'text-color': weakColor } },
+      { id: 'preview-role-face', source: 'markers', type: 'circle', minzoom: roleZoom, filter: isNode, paint: compactRoleFace },
+      { id: roleLayer, source: 'markers', type: 'symbol', minzoom: roleZoom, filter: ['all', isNode, ['has', 'roleImage']], layout: themedRoleGlyphLayout },
+      { id: labelLayer, source: 'markers', type: 'symbol', minzoom: labelZoom, filter: isOrdinaryNode, layout: nameLayout, paint: { ...textPaint, 'text-opacity': nameOpacity } },
+      { id: evidenceLabelLayer, source: 'markers', type: 'symbol', filter: isCandidate, layout: evidenceNameLayout, paint: { ...textPaint, 'text-opacity': nameOpacity } },
+      { id: hopLayer, source: 'markers', type: 'symbol', filter: isCandidate, layout: hopLayout, paint: { ...textPaint, 'text-color': [...confidenceInk] } },
+      { id: ambiguousLayer, source: 'markers', type: 'symbol', filter: ['all', isCandidate, isAmbiguous], layout: ambiguityLayout, paint: { ...textPaint, 'text-color': weakColor } },
       { id: gapLayer, source: 'markers', type: 'symbol', filter: isGap, layout: {
-        'icon-image': 'schematic-box', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'text-field': ['get', 'gapLabel'], 'text-font': ['sans-serif'], 'text-size': 11,
-        'text-allow-overlap': true, 'text-ignore-placement': true,
+        'icon-image': `schematic-box-${theme}`, 'icon-size': 0.84, 'icon-allow-overlap': true,
+        'text-field': ['get', 'prefix'], 'text-font': ['monospace'], 'text-size': 11,
+        'text-anchor': 'center', 'text-allow-overlap': true,
       }, paint: { 'text-color': weakColor } },
-      { id: raisedLayer, source: chosenSource, type: 'circle', paint: {
-        'circle-radius': 16, 'circle-color': ['coalesce', ['get', 'color'], strongColor],
-        'circle-stroke-color': white, 'circle-stroke-width': 4,
-      } },
-      { id: 'preview-raised-role', source: chosenSource, type: 'symbol', layout: {
-        'icon-image': ['get', 'roleImage'], 'icon-allow-overlap': true, 'icon-ignore-placement': true,
-      } },
-      { id: 'preview-raised-label', source: chosenSource, type: 'symbol', layout: {
-        ...nameLayout, 'text-field': ['get', 'raisedLabel'], 'text-allow-overlap': true, 'text-ignore-placement': true,
-      }, paint: textPaint },
+      { id: gapHopLayer, source: 'markers', type: 'symbol', filter: isGap, layout: {
+        ...hopLayout, 'text-anchor': 'bottom', 'text-offset': [0, -1.12],
+      }, paint: { ...textPaint, 'text-color': weakColor } },
       { id: 'preview-flow-arrival', source: flowSource, type: 'circle', filter: ['==', ['get', 'kind'], 'arrival'], paint: {
-        'circle-radius': ['get', 'radius'], 'circle-opacity': 0, 'circle-stroke-color': flowColor,
+        'circle-radius': ['step', ['zoom'], ['get', 'radius'], roleZoom, ['+', ['number', ['get', 'radius']], 5]],
+        'circle-opacity': 0, 'circle-stroke-color': flowColor,
         'circle-stroke-width': 3, 'circle-stroke-opacity': ['get', 'opacity'],
       } },
       { id: 'preview-flow-schematic', source: flowSource, type: 'symbol', filter: ['==', ['get', 'kind'], 'schematic'], layout: {
-        'icon-image': 'schematic-box', 'icon-size': 0.45, 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'icon-image': `schematic-box-${theme}`, 'icon-size': 0.45, 'icon-allow-overlap': true, 'icon-ignore-placement': true,
       }, paint: { 'icon-opacity': ['get', 'opacity'] } },
       { id: 'preview-flow-head', source: flowSource, type: 'circle', filter: ['==', ['get', 'kind'], 'head'], paint: {
-        'circle-radius': 5, 'circle-color': flowColor, 'circle-stroke-color': white, 'circle-stroke-width': 2,
+        'circle-radius': 5, 'circle-color': flowColor, 'circle-stroke-color': casing, 'circle-stroke-width': 2,
       } },
+      { id: 'preview-raised-confidence-ring', source: chosenSource, type: 'circle', filter: isEvidence, paint: {
+        'circle-radius': ['step', ['zoom'], 17, roleZoom, 15], 'circle-color': casing, 'circle-stroke-color': casing, 'circle-stroke-width': 4,
+      } },
+      { id: 'preview-raised-confidence-ink', source: chosenSource, type: 'circle', filter: isEvidence, paint: {
+        'circle-radius': ['step', ['zoom'], 16, roleZoom, 14], 'circle-color': casing, 'circle-stroke-color': [...confidenceInk], 'circle-stroke-width': 3,
+      } },
+      { id: raisedLayer, source: chosenSource, type: 'circle', paint: {
+        'circle-radius': ['step', ['zoom'], ['case', isEvidence, 12, 16], roleZoom, ['case', isEvidence, 18, 22]],
+        'circle-color': ['step', ['zoom'], roleFill, labelZoom, casing],
+        'circle-stroke-color': roleEdge, 'circle-stroke-width': ['case', isEvidence, 0, 4],
+        // Retain the selected hit area without covering the compact confidence ring.
+        'circle-opacity': ['step', ['zoom'], 1, roleZoom, 0],
+        'circle-stroke-opacity': ['step', ['zoom'], 1, roleZoom, 0],
+      } },
+      { id: 'preview-raised-ordinary-ring', source: chosenSource, type: 'circle', minzoom: roleZoom, filter: ['!', isEvidence], paint: {
+        'circle-radius': 12.5, 'circle-color': casing, 'circle-stroke-color': roleEdge, 'circle-stroke-width': 2,
+      } },
+      { id: 'preview-raised-role-face', source: chosenSource, type: 'circle', minzoom: roleZoom, paint: compactRoleFace },
+      { id: 'preview-raised-role', source: chosenSource, type: 'symbol', layout: themedRoleGlyphLayout },
+      { id: raisedLabelLayer, source: chosenSource, type: 'symbol', layout: {
+        // MapLibre infers weight from the first family; extending the generic sans-serif name makes Canvas reject its font string.
+        ...nameLayout, 'text-font': ['Arial Semibold', 'sans-serif'],
+        'icon-image': `selected-nameplate-${theme}`, 'icon-text-fit': 'both', 'icon-text-fit-padding': [0, 6, 2, 6],
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'text-offset': ['step', ['zoom'], ['literal', [0, 26 / 12]], roleZoom,
+          ['case', isEvidence, ['literal', [0, 22 / 12]], ['literal', [0, 20 / 12]]]],
+      }, paint: { 'text-color': theme === 'light' ? white : palettes.light.ink, 'text-opacity': nameOpacity, 'icon-opacity': nameOpacity } },
+      { id: raisedHopLayer, source: chosenSource, type: 'symbol', filter: isEvidence, layout: {
+        ...hopLayout, 'text-offset': ['step', ['zoom'], ['literal', [0, -17.5 / 12]], roleZoom, ['literal', [0, -15.5 / 12]]],
+      }, paint: { ...textPaint, 'text-color': [...confidenceInk] } },
+      { id: raisedAmbiguousLayer, source: chosenSource, type: 'symbol', filter: ['all', isEvidence, isAmbiguous], layout: {
+        ...ambiguityLayout, 'text-offset': ['step', ['zoom'], ['literal', [17.5 / 14, 0]], roleZoom, ['literal', [15.5 / 14, 0]]],
+      }, paint: { ...textPaint, 'text-color': weakColor } },
     ],
   }
 }
 
-export function roleArtwork(role: NodeRole) {
-  return { roleImage: `node-role-${role}`, color: roleColors[role] }
+export function applyMapPreviewTheme(map: MapLibre, theme: MapPreviewTheme) {
+  const layers = offlineStyle(theme).layers
+  const colorProperties = ['background-color', 'fill-color', 'line-color', 'circle-color', 'circle-stroke-color', 'text-color', 'text-halo-color'] as const
+  for (const layer of layers) {
+    if (!('paint' in layer)) continue
+    const paint = layer.paint as Partial<Record<(typeof colorProperties)[number], string | ExpressionSpecification>> | undefined
+    for (const property of colorProperties) {
+      if (paint && property in paint) map.setPaintProperty(layer.id, property, paint[property])
+    }
+  }
+  map.setLayoutProperty(gapLayer, 'icon-image', `schematic-box-${theme}`)
+  map.setLayoutProperty('preview-flow-schematic', 'icon-image', `schematic-box-${theme}`)
+  map.setLayoutProperty(raisedLabelLayer, 'icon-image', `selected-nameplate-${theme}`)
+  for (const id of [roleLayer, 'preview-raised-role']) {
+    map.setLayoutProperty(id, 'icon-image', theme === 'dark' ? ['concat', ['get', 'roleImage'], '-dark'] : ['get', 'roleImage'])
+  }
+}
+
+export function excludeRaisedLabels(map: MapLibre, selectedId: string | null, overlapIds: readonly string[] = [], expandedIds: readonly string[] = []) {
+  const notSelected = ['!=', ['get', previewId], selectedId] satisfies FilterSpecification
+  const notStacked = ['!', ['in', ['get', previewId], ['literal', overlapIds]]] satisfies FilterSpecification
+  for (const layer of offlineStyle().layers) {
+    if (!('source' in layer) || ![chosenSource, 'markers'].includes(String(layer.source)) || [markerLayer, raisedLayer, clusterLayer, 'preview-cluster-count', gapLayer, gapHopLayer].includes(layer.id)) continue
+    const exclusions: FilterSpecification[] = layer.source === chosenSource
+      ? [['!', ['in', ['get', previewId], ['literal', expandedIds]]]]
+      : [notStacked]
+    if ([labelLayer, evidenceLabelLayer, hopLayer, ambiguousLayer].includes(layer.id)) exclusions.push(notSelected)
+    map.setFilter(layer.id, ['all', ...(layer.filter ? [layer.filter] : []), ...exclusions] as FilterSpecification)
+  }
+}
+
+export function roleImageId(role: NodeRole) {
+  return `node-role-${role}`
 }
 
 export const previewRoles = Object.keys(nodeRoles) as NodeRole[]
+export type PreviewRoleColors = ReadonlyMap<NodeRole, { roleInk: string; roleFill: string; roleDarkInk: string; roleDarkFill: string }>
 
 export async function loadPreviewImages(artwork: HTMLDivElement) {
   const images = await Promise.all(previewRoles.map(async (role, index) => {
-    const svg = (artwork.children[index].firstElementChild as SVGSVGElement).cloneNode(true) as SVGSVGElement
+    const element = artwork.children[index]
+    const style = getComputedStyle(element)
+    const roleInk = style.getPropertyValue('--ks-tone-light-ink').trim()
+    const roleFill = style.getPropertyValue('--ks-tone-light-fill').trim()
+    const roleDarkInk = style.getPropertyValue('--ks-tone-dark-ink').trim()
+    const roleDarkFill = style.getPropertyValue('--ks-tone-dark-fill').trim()
+    const svg = (element.firstElementChild as SVGSVGElement).cloneNode(true) as SVGSVGElement
     svg.setAttribute('width', String(roleImageSize))
     svg.setAttribute('height', String(roleImageSize))
-    svg.setAttribute('color', 'white')
-    const image = new Image()
-    image.src = `data:image/svg+xml,${encodeURIComponent(new XMLSerializer().serializeToString(svg))}`
-    await image.decode()
-    return { id: roleArtwork(role).roleImage, image }
+    const variants = await Promise.all([roleInk, roleDarkInk].map(async (color) => {
+      const variant = svg.cloneNode(true) as SVGSVGElement
+      variant.setAttribute('color', color)
+      const image = new Image()
+      image.src = `data:image/svg+xml,${encodeURIComponent(new XMLSerializer().serializeToString(variant))}`
+      await image.decode()
+      return image
+    }))
+    return { role, variants, colors: { roleInk, roleFill, roleDarkInk, roleDarkFill } }
   }))
-  return (map: MapLibre) => {
-    for (const { id, image } of images) map.addImage(id, image, { pixelRatio: 2 })
+  function install(map: MapLibre) {
+    for (const { role, variants } of images) {
+      map.addImage(roleImageId(role), variants[0], { pixelRatio: 3 })
+      map.addImage(`${roleImageId(role)}-dark`, variants[1], { pixelRatio: 3 })
+    }
     const canvas = document.createElement('canvas')
     canvas.width = 126
     canvas.height = 52
     const context = canvas.getContext('2d')!
-    context.fillStyle = '#fffaf1'
-    context.strokeStyle = weakColor
     context.lineWidth = 3
     context.setLineDash([6, 4])
     context.beginPath()
     context.roundRect(2, 2, 122, 48, 8)
-    context.fill()
-    context.stroke()
-    map.addImage('schematic-box', context.getImageData(0, 0, 126, 52), { pixelRatio: 2 })
+    for (const [theme, colors] of Object.entries(palettes)) {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = colors.gap
+      context.strokeStyle = colors.weak
+      context.fill()
+      context.stroke()
+      map.addImage(`schematic-box-${theme}`, context.getImageData(0, 0, 126, 52), { pixelRatio: 2 })
+    }
+    canvas.width = canvas.height = 32
+    for (const theme of ['light', 'dark'] as const) {
+      context.clearRect(0, 0, 32, 32)
+      context.fillStyle = theme === 'light' ? palettes.light.ink : palettes.dark.ink
+      context.beginPath()
+      context.roundRect(0, 0, 32, 32, 8)
+      context.fill()
+      map.addImage(`selected-nameplate-${theme}`, context.getImageData(0, 0, 32, 32), {
+        pixelRatio: 2, content: [0, 0, 32, 32], stretchX: [[8, 24]], stretchY: [[8, 24]],
+      })
+    }
   }
+  return { install, roleColors: new Map(images.map(({ role, colors }) => [role, colors])) }
 }
