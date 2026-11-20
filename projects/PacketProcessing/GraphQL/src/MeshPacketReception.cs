@@ -6,7 +6,7 @@ using static Pulsas.PacketProcessing.Contracts.Paths.IReceptionReadManager;
 
 namespace Pulsas.PacketProcessing.GraphQL;
 
-public class MeshPacketReception(ReadReceptionResult row)
+public class MeshPacketReception(ReadReceptionResult row) : IMeshPacketReceptionByIdResult
 {
     [GraphQLType(typeof(NonNullType<IdType>))]
     public Guid Id => row.Id;

@@ -19,7 +19,7 @@ public partial class ReceptionQuery
     )
     {
         var window = TrafficWindowFrom(from, to, filter);
-        var intervalSeconds = MeshTrafficTrend.SelectInterval(from, to);
+        var intervalSeconds = TrafficBuckets.SelectInterval(from, to);
         var rows = await reads.ReadTrendAsync(
             new(window, Duration.FromSeconds(intervalSeconds)),
             cancellationToken

@@ -2,8 +2,10 @@ using System.Buffers;
 using System.Collections.Immutable;
 using System.Text.Json;
 using Funcky.Monads;
+using HotChocolate.CostAnalysis.Types;
 using HotChocolate.Execution;
 using HotChocolate.Transport.Formatters;
+using HotChocolate.Types;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -28,13 +30,15 @@ public class ReceptionGraphQLTests
     private const string Read = """
         query ($id: ID!) {
           meshPacketReceptionById(id: $id) {
-            id arrivedAt heardAt rssi snr packetId
+            __typename
+            ... on MeshPacketReception { id arrivedAt heardAt rssi snr packetId }
+            ... on MeshPacketReceptionNotFoundError { message }
           }
         }
         """;
     private const string ReadAssessment = """
         query ReceptionDetail($id: ID!) {
-          meshPacketReceptionById(id: $id) {
+          meshPacketReceptionById(id: $id) { ... on MeshPacketReception {
             id packetId arrivedAt heardAt
             pathAssessment {
               assessedAt policyVersion pathKind status
@@ -44,7 +48,7 @@ public class ReceptionGraphQLTests
                 candidates(first: 8) { items { publicKey confidence } totalCount hasMore }
               }
             }
-          }
+          } }
         }
         """;
 
@@ -70,16 +74,12 @@ public class ReceptionGraphQLTests
     }
 
     [Fact]
-    public async Task Legacy_id_and_scalar_contract_distinguishes_unknown_and_invalid_ids()
+    public async Task Required_id_and_scalar_contract_distinguishes_unknown_and_invalid_ids()
     {
         var reads = new ReceptionReads();
         await using var app = Build(Environments.Development, true, reads);
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         var schema = executor.Schema.ToString();
-        Assert.Contains(
-            "meshPacketReceptionById(id: ID): MeshPacketReception @cost(weight: \"10\")",
-            schema
-        );
         Assert.DoesNotContain("serviceInfo", schema);
         Assert.DoesNotContain("type ServiceInfo", schema);
         Assert.Contains("arrivedAt: Instant!", schema);
@@ -113,17 +113,121 @@ public class ReceptionGraphQLTests
             Guid.Empty.ToString(),
             CancellationToken.None
         );
-        Assert.Equal(JsonValueKind.Null, Reception(unknown).ValueKind);
+        Assert.Equal(
+            "MeshPacketReceptionNotFoundError",
+            Reception(unknown).GetProperty("__typename").GetString()
+        );
         using var omitted = await ExecuteAsync(
             executor,
-            "{ meshPacketReceptionById { id } }",
+            "{ meshPacketReceptionById { __typename } }",
             null,
             CancellationToken.None
         );
-        Assert.Equal(JsonValueKind.Null, Reception(omitted).ValueKind);
+        Assert.True(omitted.RootElement.TryGetProperty("errors", out _));
         using var malformed = await ExecuteAsync(executor, Read, "bad", CancellationToken.None);
         Assert.Equal("INVALID_INPUT", ErrorCode(malformed));
         Assert.Equal(2, reads.ReceivedLookups);
+    }
+
+    [Theory]
+    [InlineData(
+        "meshPacketReceptionById",
+        "id",
+        "MeshPacketReceptionByIdResult",
+        "MeshPacketReception",
+        "MeshPacketReceptionNotFoundError",
+        10
+    )]
+    [InlineData(
+        "meshPacketPayloadById",
+        "id",
+        "MeshPacketPayloadByIdResult",
+        "MeshPacketPayload",
+        "MeshPacketPayloadNotFoundError",
+        9001
+    )]
+    [InlineData(
+        "meshPacketById",
+        "id",
+        "MeshPacketByIdResult",
+        "MeshPacket",
+        "MeshPacketNotFoundError",
+        9001
+    )]
+    [InlineData(
+        "observerActivitySummary",
+        "observerId",
+        "ObserverActivitySummaryResult",
+        "ObserverActivitySummary",
+        "ObserverNotFoundError",
+        12001
+    )]
+    public async Task Lookup_schema_requires_an_id_and_preserves_nullable_result_and_cost(
+        string field,
+        string argument,
+        string result,
+        string success,
+        string miss,
+        int cost
+    )
+    {
+        await using var app = Build(Environments.Development, true, new ReceptionReads());
+        var executor = await GetExecutorAsync(app, CancellationToken.None);
+        var lookup = executor.Schema.QueryType.Fields[field];
+        Assert.Equal("ID!", lookup.Arguments[argument].Type.ToString());
+        var union = Assert.IsAssignableFrom<UnionType>(lookup.Type);
+        Assert.Equal(result, union.Name);
+        Assert.Equal(
+            new[] { success, miss }.Order(),
+            union.Types.Select(type => type.Name).Order()
+        );
+        var directive = lookup.Directives.FirstOrDefault<CostDirective>();
+        Assert.NotNull(directive);
+        Assert.Equal(cost, directive.ToValue<CostDirective>().Weight);
+        Assert.DoesNotContain(
+            executor.Schema.Types.GetType<ObjectType>("MeshPacketPayload").Fields,
+            field => field.Name == "packet"
+        );
+    }
+
+    [Fact]
+    public async Task Invalid_lookup_and_reader_failure_do_not_erase_sibling_data()
+    {
+        var reads = new ReceptionReads { Fail = true };
+        var groups = new PayloadReads();
+        await using var app = Build(Environments.Development, true, reads, groups: groups);
+        var executor = await GetExecutorAsync(app, CancellationToken.None);
+        const string query = """
+            query ($id: ID!) {
+              malformed: meshPacketById(id: "bad") { __typename }
+              unavailable: meshPacketReceptionById(id: $id) { __typename }
+              sibling: meshPacketPayloadById(id: $id) { __typename }
+            }
+            """;
+        using var result = await ExecuteAsync(
+            executor,
+            query,
+            ReceptionId.ToString(),
+            CancellationToken.None
+        );
+        var root = result.RootElement;
+        var errors = root.GetProperty("errors")
+            .EnumerateArray()
+            .ToDictionary(error => error.GetProperty("path")[0].GetString()!);
+        Assert.Equal(2, errors.Count);
+        Assert.Equal(
+            "INVALID_INPUT",
+            errors["malformed"].GetProperty("extensions").GetProperty("code").GetString()
+        );
+        Assert.Contains("unavailable", errors.Keys);
+        Assert.DoesNotContain("fixture read failure", root.ToString());
+        var data = root.GetProperty("data");
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("malformed").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("unavailable").ValueKind);
+        Assert.Equal(
+            "MeshPacketPayloadNotFoundError",
+            data.GetProperty("sibling").GetProperty("__typename").GetString()
+        );
     }
 
     [Theory]
@@ -157,9 +261,9 @@ public class ReceptionGraphQLTests
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         const string query = """
             query ($id: ID!) {
-              meshPacketReceptionById(id: $id) {
+              meshPacketReceptionById(id: $id) { ... on MeshPacketReception {
                 packet { ... on MeshPacket { payload { ... on AdvertPayload { role } } } }
-              }
+              } }
             }
             """;
         using var result = await ExecuteAsync(
@@ -281,7 +385,7 @@ public class ReceptionGraphQLTests
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         const string query = """
             query ($id: ID!) {
-              meshPacketReceptionById(id: $id) {
+              meshPacketReceptionById(id: $id) { ... on MeshPacketReception {
                 pathAssessment {
                   assessedAt policyVersion status pathKind
                   hops {
@@ -291,7 +395,7 @@ public class ReceptionGraphQLTests
                     next: candidates(first: 1, offset: 8) { items { publicKey } hasMore }
                   }
                 }
-              }
+              } }
             }
             """;
         using var found = await ExecuteAsync(
@@ -378,9 +482,9 @@ public class ReceptionGraphQLTests
         await using var app = Build(Environments.Development, true, reads);
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         var query =
-            "query ($id: ID!) { meshPacketReceptionById(id: $id) { pathAssessment { hops { "
+            "query ($id: ID!) { meshPacketReceptionById(id: $id) { ... on MeshPacketReception { pathAssessment { hops { "
             + page
-            + " { totalCount } } } } }";
+            + " { totalCount } } } } } }";
         using var result = await ExecuteAsync(
             executor,
             query,
@@ -398,11 +502,11 @@ public class ReceptionGraphQLTests
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         const string query = """
             query ($id: ID!) {
-              meshPacketReceptionById(id: $id) {
+              meshPacketReceptionById(id: $id) { ... on MeshPacketReception {
                 a: pathAssessment { status }
                 b: pathAssessment { status }
                 c: pathAssessment { status }
-              }
+              } }
             }
             """;
         using var result = await ExecuteAsync(
@@ -491,6 +595,13 @@ public class ReceptionGraphQLTests
     [InlineData(
         "{ meshPacketReceptions(first: 100) { edges { node { packet { ... on MeshPacket { receptionCount firstArrivedAt lastArrivedAt } } } } } }"
     )]
+    [InlineData(
+        """
+            query { ...TwoLookups c: meshPacketById(id: "a") { ...Miss } d: meshPacketById(id: "b") { ...Miss } }
+            fragment TwoLookups on Query { a: meshPacketById(id: "c") { ...Miss } b: meshPacketById(id: "d") { ...Miss } }
+            fragment Miss on MeshPacketByIdResult { ... on MeshPacketNotFoundError { message } }
+            """
+    )]
     public async Task Excessive_payload_reads_are_rejected_before_database_access(string query)
     {
         var groups = new PayloadReads();
@@ -515,11 +626,11 @@ public class ReceptionGraphQLTests
         var executor = await GetExecutorAsync(app, CancellationToken.None);
         const string query = """
             query ($id: ID!) {
-              meshPacketPayloadById(id: $id) {
+              meshPacketPayloadById(id: $id) { ... on MeshPacketPayload {
                 firstPacket { sharedPayload { firstPacket { sharedPayload {
                   firstPacket { sharedPayload { id } }
                 } } } }
-              }
+              } }
             }
             """;
         using var result = await ExecuteAsync(
@@ -532,17 +643,22 @@ public class ReceptionGraphQLTests
         Assert.Equal(0, groups.Calls);
     }
 
-    [Fact]
-    public async Task Payload_lookup_batches_aliases_and_returns_null_for_missing_payloads()
+    [Theory]
+    [InlineData("meshPacketPayloadById", "MeshPacketPayloadNotFoundError")]
+    [InlineData("meshPacketById", "MeshPacketNotFoundError")]
+    public async Task Lookup_batches_aliases_and_returns_typed_misses(
+        string field,
+        string errorType
+    )
     {
         var groups = new PayloadReads();
         await using var app = Build(Environments.Development, true, groups: groups);
         var executor = await GetExecutorAsync(app, CancellationToken.None);
-        const string query = """
+        var query = $$"""
             query ($id: ID!, $other: ID!) {
-              a: meshPacketPayloadById(id: $id) { firstPacket { id } }
-              b: meshPacketPayloadById(id: $id) { id }
-              c: meshPacketPayloadById(id: $other) { id }
+              a: {{field}}(id: $id) { __typename ... on {{errorType}} { message } }
+              b: {{field}}(id: $id) { __typename }
+              c: {{field}}(id: $other) { __typename }
             }
             """;
         var other = Guid.NewGuid();
@@ -558,7 +674,7 @@ public class ReceptionGraphQLTests
             result.RootElement.ToString()
         );
         Assert.All(result.RootElement.GetProperty("data").EnumerateObject(), item =>
-            Assert.Equal(JsonValueKind.Null, item.Value.ValueKind)
+            Assert.Equal(errorType, item.Value.GetProperty("__typename").GetString())
         );
         Assert.Equal(1, groups.Calls);
         Assert.Equal(new[] { ReceptionId, other }.Order(), groups.LookupIds.Order());
@@ -596,9 +712,14 @@ public class ReceptionGraphQLTests
         ) => throw new NotSupportedException();
 
         public Task<ImmutableArray<PacketRow>> ReadPacketsByIdAsync(
-            IReadOnlyList<PacketKey> keys,
+            IReadOnlyList<Guid> ids,
             CancellationToken cancellationToken
-        ) => throw new NotSupportedException();
+        )
+        {
+            Interlocked.Increment(ref calls);
+            LookupIds = [.. ids];
+            return Task.FromResult(ImmutableArray<PacketRow>.Empty);
+        }
 
         public Task<ImmutableArray<ReceptionPageRow>> ReadHistoryAsync(
             IReadOnlyList<ReceptionPage> pages,
@@ -710,28 +831,23 @@ public class ReceptionGraphQLTests
         public int AssessmentReads { get; private set; }
         public ReadPathAssessmentResult? Assessment { get; set; }
         public ReceptionReadDetails? Details { get; init; }
+        public bool Fail { get; init; }
         public Option<ReadPathAssessmentError> AssessmentError { get; init; }
 
-        public Task<Option<ReadReceptionResult>> ReadReceptionAsync(
-            Guid id,
+        public Task<ImmutableArray<ReadReceptionResult>> ReadReceptionsByIdAsync(
+            IReadOnlyList<Guid> ids,
             CancellationToken cancellationToken
         )
         {
             ReceivedLookups++;
-            return Task.FromResult(
-                id == ReceptionId
-                    ? Option.Some(
-                        new ReadReceptionResult(
-                            id,
-                            At,
-                            null,
-                            -85,
-                            4.25,
-                            Details?.Packet?.Id,
-                            Details
-                        )
-                    )
-                    : Option<ReadReceptionResult>.None
+            if (Fail)
+            {
+                throw new InvalidOperationException("fixture read failure");
+            }
+            return Task.FromResult<ImmutableArray<ReadReceptionResult>>(
+                ids.Contains(ReceptionId)
+                    ? [new(ReceptionId, At, null, -85, 4.25, Details?.Packet?.Id, Details)]
+                    : []
             );
         }
 

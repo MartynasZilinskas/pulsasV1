@@ -464,27 +464,36 @@ public partial class PathAssessmentIntegrationTests
             }
         );
 
-    private static async Task<JsonElement> PostTrafficQueryAsync(
+    private static Task<JsonElement> PostTrafficQueryAsync(
         HttpClient client,
         string query,
         DateTimeOffset start,
         DateTimeOffset end,
         object? filter,
         CancellationToken cancellationToken
+    ) =>
+        PostGraphqlQueryAsync(
+            client,
+            query,
+            new
+            {
+                from = InstantPattern.ExtendedIso.Format(Instant.FromDateTimeOffset(start)),
+                to = InstantPattern.ExtendedIso.Format(Instant.FromDateTimeOffset(end)),
+                filter,
+            },
+            cancellationToken
+        );
+
+    private static async Task<JsonElement> PostGraphqlQueryAsync(
+        HttpClient client,
+        string query,
+        object variables,
+        CancellationToken cancellationToken
     )
     {
         using var response = await client.PostAsJsonAsync(
             "/graphql",
-            new
-            {
-                query,
-                variables = new
-                {
-                    from = InstantPattern.ExtendedIso.Format(Instant.FromDateTimeOffset(start)),
-                    to = InstantPattern.ExtendedIso.Format(Instant.FromDateTimeOffset(end)),
-                    filter,
-                },
-            },
+            new { query, variables },
             cancellationToken
         );
         var body = await response.Content.ReadAsStringAsync(cancellationToken);

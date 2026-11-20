@@ -5,11 +5,19 @@ namespace Pulsas.PacketProcessing.GraphQL;
 
 public static class ReceptionBrowserRegistration
 {
+    // Explicit query unions keep lookup fields nullable so execution errors preserve sibling data.
     public static IRequestExecutorBuilder AddReceptionBrowser(this IRequestExecutorBuilder graph) =>
         graph
             .AddQueryType<ReceptionQuery>()
             .AddReceptionBrowserTypes()
             .AddType<MeshPacket>()
+            .AddType<MeshPacketPayload>()
+            .AddType<MeshPacketReception>()
+            .AddType<ObserverActivitySummary>()
+            .AddType<MeshPacketNotFoundError>()
+            .AddType<MeshPacketPayloadNotFoundError>()
+            .AddType<MeshPacketReceptionNotFoundError>()
+            .AddType<ObserverNotFoundError>()
             .AddType<PacketDecodeError>()
             .AddType<RequestPayload>()
             .AddType<ResponsePayload>()

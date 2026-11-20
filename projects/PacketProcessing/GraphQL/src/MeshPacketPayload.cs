@@ -6,7 +6,7 @@ using static Pulsas.PacketProcessing.GraphQL.ReceptionQuery;
 
 namespace Pulsas.PacketProcessing.GraphQL;
 
-public class MeshPacketPayload(PayloadRow row)
+public class MeshPacketPayload(PayloadRow row) : IMeshPacketPayloadByIdResult
 {
     // With the Gateway's 36,000 field budget this permits a detail and its two
     // independently paged children, but not four grouped database reads.

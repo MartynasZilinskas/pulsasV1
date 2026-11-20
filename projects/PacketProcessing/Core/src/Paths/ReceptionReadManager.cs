@@ -66,7 +66,7 @@ public class ReceptionReadManager(IDbContextFactory<TrackingDbContext> dbFactory
                 )
             );
 
-    private static PacketSignatureStatus ReadSignature(AdvertSignatureStatus value) =>
+    internal static PacketSignatureStatus ReadSignature(AdvertSignatureStatus value) =>
         value switch
         {
             AdvertSignatureStatus.NotChecked => PacketSignatureStatus.NotChecked,
@@ -81,18 +81,20 @@ public class ReceptionReadManager(IDbContextFactory<TrackingDbContext> dbFactory
             ? uri.Authority
             : "Broker";
 
-    public async Task<Option<ReadReceptionResult>> ReadReceptionAsync(
-        Guid id,
+    public async Task<ImmutableArray<ReadReceptionResult>> ReadReceptionsByIdAsync(
+        IReadOnlyList<Guid> ids,
         CancellationToken cancellationToken
     )
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        return Option.FromNullable(
-            await db
-                .MeshPacketReceptions.Where(row => row.Id == id)
+        var keys = ids.ToArray();
+        return
+        [
+            .. await db
+                .MeshPacketReceptions.Where(row => keys.Contains(row.Id))
                 .Select(Reception)
-                .SingleOrDefaultAsync(cancellationToken)
-        );
+                .ToArrayAsync(cancellationToken),
+        ];
     }
 
     public async Task<ImmutableArray<ReadReceptionResult>> ReadReceptionsAsync(

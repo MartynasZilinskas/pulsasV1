@@ -41,7 +41,10 @@ query ReceptionPage($after: Cursor, $filter: MeshPacketReceptionFilterInput) {
 }
 
 query ReceptionDetail($id: ID!) {
-  meshPacketReceptionById(id: $id) { ...ReceptionFields }
+  meshPacketReceptionById(id: $id) {
+    ...ReceptionFields
+    ... on MeshPacketReceptionNotFoundError { message }
+  }
 }
 
 query ReceptionHistogram($filter: MeshPacketReceptionFilterInput, $refreshCursor: Cursor) {

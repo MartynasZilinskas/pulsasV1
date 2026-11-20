@@ -1,9 +1,6 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using NodaTime.Text;
-using Pulsas.Gateway.ApiService;
 using Pulsas.MeshCore.Cryptography;
 using Pulsas.MeshCore.Packets;
 using Xunit;
@@ -35,20 +32,8 @@ public partial class PathAssessmentIntegrationTests
             token
         );
 
-        await using var gateway = GatewayApplication.Build(
-            new WebApplicationOptions { EnvironmentName = "Development" },
-            builder =>
-            {
-                builder.Configuration.Sources.Clear();
-                builder.Configuration.AddInMemoryCollection(
-                    new Dictionary<string, string?>
-                    {
-                        ["Gateway:EnableReceptionReads"] = "true",
-                        ["ConnectionStrings:pulsas"] = database.ConnectionString,
-                    }
-                );
-            }
-        );
+        var reads = new TrafficReadInterceptor();
+        await using var gateway = BuildTrafficGateway(database, reads);
         gateway.Urls.Add("http://127.0.0.1:0");
         await gateway.StartAsync(token);
         using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
@@ -129,12 +114,15 @@ public partial class PathAssessmentIntegrationTests
         const string details = """
             query ($id: ID!, $packet: Cursor, $reception: Cursor) {
               meshPacketPayloadById(id: $id) {
-                firstPacket { id }
-                packets(first: 1, after: $packet) {
-                  edges { cursor node { __typename id receptionCount pathHops { prefix } } }
-                }
-                receptions(first: 1, after: $reception) {
-                  edges { cursor node { __typename id packetId arrivedAt heardAt observer { id } region { code } } }
+                __typename
+                ... on MeshPacketPayload {
+                  firstPacket { id }
+                  packets(first: 1, after: $packet) {
+                    edges { cursor node { __typename id receptionCount pathHops { prefix } } }
+                  }
+                  receptions(first: 1, after: $reception) {
+                    edges { cursor node { __typename id packetId arrivedAt heardAt observer { id } region { code } } }
+                  }
                 }
               }
             }
@@ -173,30 +161,69 @@ public partial class PathAssessmentIntegrationTests
         );
         Assert.Equal(commonId, RepresentativeId(updated));
         Assert.Equal(commonId, RepresentativeId(group));
-        const string selectedPacket = """
-            query ($id: ID!, $packetId: ID!, $first: Int!) {
-              meshPacketPayloadById(id: $id) {
-                firstPacket { id }
-                packet(id: $packetId) {
-                  __typename id receptionCount pathHops { prefix }
-                  receptions(first: $first) { edges { node { id packetId } } }
-                }
+
+        const string batch = """
+            query ($first: ID!, $second: ID!, $missing: ID!) {
+              first: meshPacketById(id: $first) { ... on MeshPacket { id } }
+              second: meshPacketById(id: $second) { ... on MeshPacket { id } }
+              missing: meshPacketById(id: $missing) { __typename }
+            }
+            """;
+        var beforeBatch = reads.Count;
+        var batched = await ReadAsync(
+            batch,
+            new
+            {
+                first = commonId,
+                second = otherId,
+                missing = Guid.NewGuid(),
+            }
+        );
+        Assert.Equal(commonId, batched.GetProperty("first").GetProperty("id").GetGuid());
+        Assert.Equal(otherId, batched.GetProperty("second").GetProperty("id").GetGuid());
+        Assert.Equal(
+            "MeshPacketNotFoundError",
+            batched.GetProperty("missing").GetProperty("__typename").GetString()
+        );
+        Assert.Equal(beforeBatch + 1, reads.Count);
+
+        const string statsOnly = """
+            query ($id: ID!) {
+              meshPacketById(id: $id) {
+                ... on MeshPacket { receptionCount firstArrivedAt lastArrivedAt }
               }
             }
             """;
-        var selected = (
-            await ReadAsync(
-                selectedPacket,
-                new
-                {
-                    id = groupId,
-                    packetId = otherId,
-                    first = 10,
+        var beforeStats = reads.Count;
+        var stats = (await ReadAsync(statsOnly, new { id = otherId })).GetProperty(
+            "meshPacketById"
+        );
+        Assert.Equal(beforeStats + 2, reads.Count);
+        Assert.Equal(1, stats.GetProperty("receptionCount").GetInt64());
+        Assert.Equal(
+            at.AddSeconds(2).ToUnixTimeMilliseconds(),
+            stats.GetProperty("firstArrivedAt").GetDateTimeOffset().ToUnixTimeMilliseconds()
+        );
+        Assert.Equal(
+            stats.GetProperty("firstArrivedAt").GetDateTimeOffset(),
+            stats.GetProperty("lastArrivedAt").GetDateTimeOffset()
+        );
+
+        const string selectedPacket = """
+            query ($id: ID!, $first: Int!, $after: Cursor) {
+              meshPacketById(id: $id) {
+                __typename
+                ... on MeshPacket {
+                  id receptionCount firstArrivedAt lastArrivedAt pathHops { prefix }
+                  receptions(first: $first, after: $after) { edges { node { id packetId } } }
                 }
-            )
-        ).GetProperty("meshPacketPayloadById");
-        Assert.Equal(commonId, RepresentativeId(selected));
-        var selectedNode = selected.GetProperty("packet");
+                ... on MeshPacketNotFoundError { message }
+              }
+            }
+            """;
+        var selectedNode = (
+            await ReadAsync(selectedPacket, new { id = otherId, first = 10 })
+        ).GetProperty("meshPacketById");
         Assert.Equal("MeshPacket", selectedNode.GetProperty("__typename").GetString());
         Assert.Equal(otherId, selectedNode.GetProperty("id").GetGuid());
         Assert.Equal(1, selectedNode.GetProperty("receptionCount").GetInt64());
@@ -205,26 +232,10 @@ public partial class PathAssessmentIntegrationTests
             SingleNode(selectedNode.GetProperty("receptions")).GetProperty("id").GetGuid()
         );
         var unknown = (
-            await ReadAsync(
-                selectedPacket,
-                new
-                {
-                    id = groupId,
-                    packetId = Guid.NewGuid(),
-                    first = 1,
-                }
-            )
-        ).GetProperty("meshPacketPayloadById").GetProperty("packet");
-        Assert.Equal(JsonValueKind.Null, unknown.ValueKind);
-        var invalid = await PostAsync(
-            selectedPacket,
-            new
-            {
-                id = groupId,
-                packetId = "invalid",
-                first = 1,
-            }
-        );
+            await ReadAsync(selectedPacket, new { id = Guid.NewGuid(), first = 1 })
+        ).GetProperty("meshPacketById");
+        Assert.Equal("MeshPacketNotFoundError", unknown.GetProperty("__typename").GetString());
+        var invalid = await PostAsync(selectedPacket, new { id = "invalid", first = 1 });
         Assert.Equal(
             "INVALID_INPUT",
             invalid
@@ -234,38 +245,13 @@ public partial class PathAssessmentIntegrationTests
                 .GetString()
         );
 
-        const string batchedSelection = """
-            query ($packetId: ID!) {
-              meshPacketPayloads(first: 2) {
-                edges { node { id packet(id: $packetId) { id } } }
-              }
-            }
-            """;
-        var selectionEdges = (await ReadAsync(batchedSelection, new { packetId = otherId }))
-            .GetProperty("meshPacketPayloads")
-            .GetProperty("edges");
-        Assert.Equal(2, selectionEdges.GetArrayLength());
-        foreach (var edge in selectionEdges.EnumerateArray())
-        {
-            var payload = edge.GetProperty("node");
-            var packet = payload.GetProperty("packet");
-            if (payload.GetProperty("id").GetGuid() == groupId)
-            {
-                Assert.Equal(otherId, packet.GetProperty("id").GetGuid());
-            }
-            else
-            {
-                Assert.Equal(JsonValueKind.Null, packet.ValueKind);
-            }
-        }
-
         const string packetStats = """
             query ($id: ID!) {
-              meshPacketPayloadById(id: $id) {
+              meshPacketPayloadById(id: $id) { ... on MeshPacketPayload {
                 packets {
                   edges { node { id receptionCount firstArrivedAt lastArrivedAt pathHops { prefix } } }
                 }
-              }
+              } }
             }
             """;
         var packetStatsEdges = (await ReadAsync(packetStats, new { id = groupId }))
@@ -300,14 +286,14 @@ public partial class PathAssessmentIntegrationTests
 
         const string packetHistory = """
             query ($id: ID!, $first: Int!, $after: Cursor) {
-              meshPacketPayloadById(id: $id) {
+              meshPacketPayloadById(id: $id) { ... on MeshPacketPayload {
                 firstPacket {
                   id receptionCount firstArrivedAt lastArrivedAt
                   receptions(first: $first, after: $after) {
                     edges { cursor node { id packetId } }
                   }
                 }
-              }
+              } }
             }
             """;
         var firstPacket = (await ReadAsync(packetHistory, new { id = groupId, first = 1 }))
@@ -332,11 +318,23 @@ public partial class PathAssessmentIntegrationTests
             ).GetProperty("meshPacketPayloadById").GetProperty("firstPacket").GetProperty("receptions"));
         Assert.Equal(original, older.GetProperty("id").GetGuid());
         Assert.Equal(commonId, older.GetProperty("packetId").GetGuid());
+        var directOlder = (
+            await ReadAsync(
+                selectedPacket,
+                new
+                {
+                    id = commonId,
+                    first = 1,
+                    after = packetHistoryCursor,
+                }
+            )
+        ).GetProperty("meshPacketById").GetProperty("receptions");
+        Assert.Equal(original, SingleNode(directOlder).GetProperty("id").GetGuid());
 
         const string fromReception = """
-            query ($id: ID!) { meshPacketReceptionById(id: $id) { packet { ... on MeshPacket {
+            query ($id: ID!) { meshPacketReceptionById(id: $id) { ... on MeshPacketReception { packet { ... on MeshPacket {
               id receptionCount sharedPayload { id firstPacket { id } }
-            } } } }
+            } } } } }
             """;
         var seenPacket = (await ReadAsync(fromReception, new { id = third }))
             .GetProperty("meshPacketReceptionById")
@@ -411,10 +409,10 @@ public partial class PathAssessmentIntegrationTests
         );
         Assert.Equal(otherId, RepresentativeId(afterBackfill));
         var wrongPacket = await PostAsync(
-            packetHistory,
+            selectedPacket,
             new
             {
-                id = groupId,
+                id = otherId,
                 first = 1,
                 after = packetHistoryCursor,
             }
@@ -437,27 +435,29 @@ public partial class PathAssessmentIntegrationTests
         Assert.Equal(v.GetProperty("node").GetProperty("id").GetGuid(), RepresentativeId(tied));
         await RemoveFixtureReceptionsAsync([third]);
         var withoutReceptions = (
-            await ReadAsync(
-                selectedPacket,
-                new
-                {
-                    id = groupId,
-                    packetId = otherId,
-                    first = 1,
-                }
-            )
-        ).GetProperty("meshPacketPayloadById").GetProperty("packet");
+            await ReadAsync(selectedPacket, new { id = otherId, first = 1 })
+        ).GetProperty("meshPacketById");
         Assert.Equal(otherId, withoutReceptions.GetProperty("id").GetGuid());
         Assert.Equal(0, withoutReceptions.GetProperty("receptionCount").GetInt64());
+        Assert.Equal(JsonValueKind.Null, withoutReceptions.GetProperty("firstArrivedAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, withoutReceptions.GetProperty("lastArrivedAt").ValueKind);
         Assert.Empty(
             withoutReceptions.GetProperty("receptions").GetProperty("edges").EnumerateArray()
         );
         await RemoveFixtureReceptionsAsync([second]);
         Assert.Equal(
-            JsonValueKind.Null,
+            "MeshPacketNotFoundError",
+            (await ReadAsync(selectedPacket, new { id = otherId, first = 1 }))
+                .GetProperty("meshPacketById")
+                .GetProperty("__typename")
+                .GetString()
+        );
+        Assert.Equal(
+            "MeshPacketPayloadNotFoundError",
             (await ReadAsync(details, new { id = groupId }))
                 .GetProperty("meshPacketPayloadById")
-                .ValueKind
+                .GetProperty("__typename")
+                .GetString()
         );
         Assert.Empty(
             (await ReadAsync(groups, new { after = headCursor }))

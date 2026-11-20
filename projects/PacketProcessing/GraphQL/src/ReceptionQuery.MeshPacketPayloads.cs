@@ -44,12 +44,37 @@ public partial class ReceptionQuery
     }
 
     [Cost(MeshPacketPayload.ReadCost)]
-    public Task<MeshPacketPayload?> GetMeshPacketPayloadByIdAsync(
+    public async Task<IMeshPacketPayloadByIdResult?> GetMeshPacketPayloadByIdAsync(
         [GraphQLType(typeof(NonNullType<IdType>))] string id,
         [Service] PayloadByIdDataLoader payloads,
         CancellationToken cancellationToken
-    ) =>
-        Guid.TryParse(id, out var payloadId)
-            ? payloads.LoadAsync(payloadId, cancellationToken)
-            : throw Error("INVALID_INPUT", "Expected a mesh packet payload UUID.");
+    )
+    {
+        if (!Guid.TryParse(id, out var payloadId))
+        {
+            throw Error("INVALID_INPUT", "Expected a mesh packet payload UUID.");
+        }
+
+        var payload = await payloads.LoadAsync(payloadId, cancellationToken);
+        return payload is null ? new MeshPacketPayloadNotFoundError() : payload;
+    }
+
+    [Cost(MeshPacketPayload.ReadCost)]
+    [GraphQLDescription(
+        "Looks up an exact wire packet by UUID. Its shared payload must have a retained reception."
+    )]
+    public async Task<IMeshPacketByIdResult?> GetMeshPacketByIdAsync(
+        [GraphQLType(typeof(NonNullType<IdType>))] string id,
+        [Service] PacketByIdDataLoader packets,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!Guid.TryParse(id, out var packetId))
+        {
+            throw Error("INVALID_INPUT", "Expected a mesh packet UUID.");
+        }
+
+        var packet = await packets.LoadAsync(packetId, cancellationToken);
+        return packet is null ? new MeshPacketNotFoundError() : packet;
+    }
 }

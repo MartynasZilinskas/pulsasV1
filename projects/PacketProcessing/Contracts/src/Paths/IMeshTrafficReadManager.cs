@@ -16,6 +16,10 @@ public interface IMeshTrafficReadManager
         TrafficWindow window,
         CancellationToken cancellationToken
     );
+    Task<Option<ObserverActivity>> ReadObserverActivityAsync(
+        ObserverActivityInput input,
+        CancellationToken cancellationToken
+    );
 
     public record TrafficWindow(
         Instant From,
@@ -28,6 +32,27 @@ public interface IMeshTrafficReadManager
     public record SummaryInput(TrafficWindow Window, bool IncludePacketTypeCounts);
 
     public record TrendInput(TrafficWindow Window, Duration BucketWidth);
+
+    public record ObserverActivityInput(
+        Guid ObserverId,
+        Instant From,
+        Instant To,
+        ImmutableArray<string> RegionCodes,
+        ImmutableArray<PacketType> PacketTypes,
+        Duration BucketWidth
+    );
+
+    public record ObserverActivity(
+        long ReceptionCount,
+        Option<Instant> FirstArrivedAt,
+        Option<Instant> LastArrivedAt,
+        SignalSummary Snr,
+        SignalSummary Rssi,
+        ImmutableArray<PacketTypeCount> PacketTypeCounts,
+        ImmutableArray<ReceptionBucket> Buckets
+    );
+
+    public record ReceptionBucket(Instant Start, long ReceptionCount);
 
     public record TrendBucket(
         Instant Start,

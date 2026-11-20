@@ -68,28 +68,34 @@ UUID (not a packet UUID) as the `id` variable:
 ```graphql
 query ReceptionDetail($id: ID!) {
   meshPacketReceptionById(id: $id) {
-    id
-    packetId
-    arrivedAt
-    heardAt
-    pathAssessment {
-      assessedAt
-      policyVersion
-      pathKind
-      status
-      hops {
-        position
-        prefix
-        outcome
-        selectedCandidate { nodeId publicKey confidence reasons supportCount }
-        candidates(first: 8) { items { publicKey confidence } totalCount hasMore }
+    ... on MeshPacketReception {
+      id
+      packetId
+      arrivedAt
+      heardAt
+      pathAssessment {
+        assessedAt
+        policyVersion
+        pathKind
+        status
+        hops {
+          position
+          prefix
+          outcome
+          selectedCandidate { nodeId publicKey confidence reasons supportCount }
+          candidates(first: 8) { items { publicKey confidence } totalCount hasMore }
+        }
       }
     }
+    ... on MeshPacketReceptionNotFoundError { message }
   }
 }
 ```
 
-An unknown UUID returns `null`; a malformed UUID returns an error. An existing
+The reception, wire-packet, shared-payload, and observer activity lookups require
+an ID and return a union of the requested data and a typed not-found result.
+A valid but unknown UUID returns the not-found result in `data`. Malformed UUIDs
+return `INVALID_INPUT` in GraphQL `errors`, not a not-found result. An existing
 reception without a recorded assessment (including older and pending receptions)
 returns `pathAssessment: null`. Unresolved and unsupported paths are recorded
 results, not missing assessments. Results are never recomputed on read.
@@ -175,6 +181,23 @@ means unbounded on that side. Finite edges are 32–256 bytes in steps of 32,
 −30–20 dB in steps of 5, and −130–−30 dBm in steps of 10. These are grouping
 edges, not validity limits. Coverage remains `UNKNOWN`.
 
+### Observer activity
+
+`observerActivitySummary(observerId: ID!, from: Instant!, to: Instant!, filter: ObserverActivityFilterInput)`
+uses the same exact server-arrival bounds, up to 30 days. Pass the observer UUID
+from `observers`; optional `regionCodes` and `packetTypes` filter the receptions
+before all calculations. The response includes total receptions, the packet-type
+mix, SNR and RSSI means with independent valid sample counts, and the first and
+last matching server arrivals. Its UTC buckets report reception counts, including
+zero for empty buckets, and are clipped to the requested bounds. All fields come
+from one database snapshot.
+
+Select activity fields with `... on ObserverActivitySummary`. An unknown observer
+returns `ObserverNotFoundError`. A known observer with no matching receptions
+returns zero counts and `null` first/last arrivals and means.
+`historyCoverage` is `UNKNOWN` in either a populated or empty summary; gaps in
+recorded activity do not establish downtime.
+
 ### Grouped packets
 
 Use `meshPacketReceptions` for one row per reception, or `meshPacketPayloads`
@@ -206,19 +229,22 @@ repeats of the exact wire bytes share a packet. `firstPacket` is the packet from
 the earliest retained reception, with ties broken by packet ID. It is the
 default packet to display, not evidence of the original transmission. Backfill or
 deletion can change the representative. A payload with no linked receptions is
-omitted from the feed and its lookup returns `null`.
+omitted from the feed and its lookup returns `MeshPacketPayloadNotFoundError`.
 
 ```graphql
 query FirstPacketHistory($id: ID!, $first: Int!, $after: Cursor) {
   meshPacketPayloadById(id: $id) {
-    firstPacket {
-      id
-      pathHops { prefix }
-      receptions(first: $first, after: $after) {
-        edges { node { id arrivedAt heardAt rssi snr observer { id } } }
-        pageInfo { hasNextPage endCursor }
+    ... on MeshPacketPayload {
+      firstPacket {
+        id
+        pathHops { prefix }
+        receptions(first: $first, after: $after) {
+          edges { node { id arrivedAt heardAt rssi snr observer { id } } }
+          pageInfo { hasNextPage endCursor }
+        }
       }
     }
+    ... on MeshPacketPayloadNotFoundError { message }
   }
 }
 ```
@@ -226,13 +252,32 @@ query FirstPacketHistory($id: ID!, $first: Int!, $after: Cursor) {
 Both histories return `MeshPacketReception` nodes. Use the reception `id` to
 open its stored assessment. Connections are live reads, not snapshots, and
 each cursor is scoped to its connection and parent. If `firstPacket` changes,
-restart its history without the old packet's cursor. To reopen a selected
-packet, use `packet(id: $packetId)` in place of `firstPacket` in the example,
-with `$packetId: ID!` set to a node ID from `packets`. The lookup returns `null`
-if the packet is missing or belongs to another payload. Fetch detail and history
-on demand rather than for every feed row in one operation. `MeshPacket.sharedPayload`
-links back to the shared payload; legacy `MeshPacket.payload` is unchanged. The
-shared decode excludes packet verification results and chat message links.
+restart its history without the old packet's cursor.
+
+Use `meshPacketById` to reopen a selected packet with just its packet UUID:
+
+```graphql
+query PacketDetail($id: ID!, $after: Cursor) {
+  meshPacketById(id: $id) {
+    ... on MeshPacket {
+      id
+      pathHops { prefix }
+      receptions(first: 20, after: $after) {
+        edges { node { id arrivedAt snr rssi } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+    ... on MeshPacketNotFoundError { message }
+  }
+}
+```
+
+A packet can have an empty reception history and still be visible if another
+packet sharing its payload has a retained reception. Once the payload has none,
+the lookup returns `MeshPacketNotFoundError`, just as for an unknown UUID.
+Fetch detail and history on demand. `MeshPacket.sharedPayload` links back to the
+shared payload; legacy `MeshPacket.payload` is unchanged. The shared decode
+excludes packet verification results and chat message links.
 
 Packet statistics are exact. On the reception feed, even one requested packet
 statistic can require counting that packet's retained history. The Gateway's

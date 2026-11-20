@@ -1031,8 +1031,10 @@ public partial class PathAssessmentIntegrationTests
         Assert.Equal(JsonValueKind.Null, pending.GetProperty("pathAssessment").ValueKind);
         await AssertLegacyPacketVisibilityAsync(database, client, unsupportedId, token);
         Assert.Equal(
-            JsonValueKind.Null,
-            (await ReadReceptionGraphQLAsync(client, Guid.NewGuid(), token)).ValueKind
+            "MeshPacketReceptionNotFoundError",
+            (await ReadReceptionGraphQLAsync(client, Guid.NewGuid(), token))
+                .GetProperty("__typename")
+                .GetString()
         );
         await AssertOversizedSnapshotReadAsync(database, client, pendingId, token);
         await gateway.StopAsync(token);
@@ -1470,19 +1472,30 @@ public partial class PathAssessmentIntegrationTests
         async Task AssertSharedVisibilityAsync(Guid? expected)
         {
             const string sharedQuery = """
-                query ($id: ID!) {
-                  meshPacketPayloadById(id: $id) {
+                query ($id: ID!, $packetId: ID!) {
+                  meshPacketPayloadById(id: $id) { ... on MeshPacketPayload {
                     decodedPayload { ... on DecodedGroupTextPayload { channelHash } }
                     firstPacket { payload { ... on GroupTextPayload { chatMessage { id } } } }
                     packets(first: 1) {
                       edges { node { payload { ... on GroupTextPayload { chatMessage { id } } } } }
                     }
-                  }
+                  } }
+                  meshPacketById(id: $packetId) { ... on MeshPacket {
+                    payload { ... on GroupTextPayload { chatMessage { id } } }
+                  } }
                 }
                 """;
             using var response = await client.PostAsJsonAsync(
                 "/graphql",
-                new { query = sharedQuery, variables = new { id = reception.Packet.ContentId } },
+                new
+                {
+                    query = sharedQuery,
+                    variables = new
+                    {
+                        id = reception.Packet.ContentId,
+                        packetId = reception.Packet.Id,
+                    },
+                },
                 token
             );
             var json = await response.Content.ReadAsStringAsync(token);
@@ -1496,6 +1509,7 @@ public partial class PathAssessmentIntegrationTests
             {
                 payload.GetProperty("firstPacket"),
                 payload.GetProperty("packets").GetProperty("edges")[0].GetProperty("node"),
+                result.RootElement.GetProperty("data").GetProperty("meshPacketById"),
             };
             foreach (var packet in packets)
             {
@@ -1544,7 +1558,7 @@ public partial class PathAssessmentIntegrationTests
     {
         var lookup = new
         {
-            query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { id } }",
+            query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { ... on MeshPacketReception { id } } }",
             variables = new { id },
         };
         using var foreignHost = new HttpRequestMessage(HttpMethod.Post, "/graphql")
@@ -1616,7 +1630,7 @@ public partial class PathAssessmentIntegrationTests
             "/graphql",
             new
             {
-                query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { id pathAssessment { status } } }",
+                query = "query ($id: ID!) { meshPacketReceptionById(id: $id) { ... on MeshPacketReception { id pathAssessment { status } } } }",
                 variables = new { id },
             },
             token
@@ -1647,10 +1661,13 @@ public partial class PathAssessmentIntegrationTests
                 query = """
                 query ($id: ID!) {
                   meshPacketReceptionById(id: $id) {
-                    id packetId arrivedAt heardAt
-                    pathAssessment { assessedAt policyVersion status hops {
-                      prefix selectedCandidate { publicKey supportCount }
-                    } }
+                    __typename
+                    ... on MeshPacketReception {
+                      id packetId arrivedAt heardAt
+                      pathAssessment { assessedAt policyVersion status hops {
+                        prefix selectedCandidate { publicKey supportCount }
+                      } }
+                    }
                   }
                 }
                 """,

@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using Funcky.Monads;
 using HotChocolate.CostAnalysis.Types;
 using NodaTime;
 using Pulsas.PacketProcessing.Contracts.Paths;
@@ -152,29 +151,19 @@ public partial class ReceptionQuery
 
     [Cost(10)]
     [GraphQLDescription("Looks up a recorded reception by its UUID.")]
-    public async Task<MeshPacketReception?> GetMeshPacketReceptionByIdAsync(
-        [GraphQLType(typeof(IdType))] string? id,
-        [Service] IReceptionReadManager reads,
+    public async Task<IMeshPacketReceptionByIdResult?> GetMeshPacketReceptionByIdAsync(
+        [GraphQLType(typeof(NonNullType<IdType>))] string id,
+        [Service] ReceptionByIdDataLoader receptions,
         CancellationToken cancellationToken
     )
     {
-        if (id is null)
-        {
-            return null;
-        }
         if (!Guid.TryParse(id, out var receptionId))
         {
-            throw new GraphQLException(
-                ErrorBuilder
-                    .New()
-                    .SetMessage("Expected a reception UUID.")
-                    .SetCode("INVALID_INPUT")
-                    .Build()
-            );
+            throw Error("INVALID_INPUT", "Expected a reception UUID.");
         }
 
-        var reception = await reads.ReadReceptionAsync(receptionId, cancellationToken);
-        return reception.Select(row => new MeshPacketReception(row)).ToNullable();
+        var reception = await receptions.LoadAsync(receptionId, cancellationToken);
+        return reception is null ? new MeshPacketReceptionNotFoundError() : reception;
     }
 
     internal static int PageSize(int? first) =>

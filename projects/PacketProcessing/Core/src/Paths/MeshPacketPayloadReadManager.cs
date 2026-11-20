@@ -144,25 +144,42 @@ public class MeshPacketPayloadReadManager(IDbContextFactory<TrackingDbContext> d
     }
 
     public async Task<ImmutableArray<PacketRow>> ReadPacketsByIdAsync(
-        IReadOnlyList<PacketKey> keys,
+        IReadOnlyList<Guid> ids,
         CancellationToken cancellationToken
     )
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await db
-            .Database.SqlQueryRaw<PacketProjection>(
-                $$"""
-                SELECT {{PacketColumns}}
-                FROM unnest(@payload_ids, @packet_ids) AS requests(payload_id, packet_id)
-                JOIN packets p ON p."Id" = requests.packet_id AND p."ContentId" = requests.payload_id
-                {{PacketChatJoins}}
-                {{PacketStatsJoin}}
-                """,
-                new NpgsqlParameter("payload_ids", keys.Select(key => key.PayloadId).ToArray()),
-                new NpgsqlParameter("packet_ids", keys.Select(key => key.PacketId).ToArray())
-            )
-            .ToArrayAsync(cancellationToken);
-        return [.. rows.Select(row => row.ToPacket())];
+        var keys = ids.ToArray();
+        return
+        [
+            .. await db
+                .MeshPackets.AsNoTracking()
+                .Where(packet => keys.Contains(packet.Id))
+                // Retention applies to the shared payload, not the selected wire variant.
+                .Where(packet =>
+                    db.MeshPackets.Any(sibling =>
+                        sibling.ContentId == packet.ContentId
+                        && db.MeshPacketReceptions.Any(reception =>
+                            reception.PacketId == sibling.Id
+                        )
+                    )
+                )
+                .Select(packet => new PacketRow(
+                    packet.Id,
+                    packet.ShortHash,
+                    packet.PacketHash,
+                    packet.RawPacket,
+                    ReceptionReadManager.ReadSignature(packet.SignatureVerification.Status),
+                    packet.ChatMessage != null
+                    && packet.ChatMessage.Channel.Public
+                    && packet.ChatMessage.Channel.Active
+                        ? packet.ChatMessageId
+                        : null,
+                    packet.ContentId,
+                    null
+                ))
+                .ToArrayAsync(cancellationToken),
+        ];
     }
 
     public async Task<ImmutableArray<ReceptionPageRow>> ReadHistoryAsync(

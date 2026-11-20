@@ -21,7 +21,7 @@ public record MeshPacket(
     IPacketPayload? Payload,
     [property: GraphQLIgnore] Guid? ContentId,
     [property: GraphQLIgnore] PacketReceptionStats? Stats
-) : IPacketResult
+) : IPacketResult, IMeshPacketByIdResult
 {
     internal static IPacketResult From(PacketRow? row)
     {

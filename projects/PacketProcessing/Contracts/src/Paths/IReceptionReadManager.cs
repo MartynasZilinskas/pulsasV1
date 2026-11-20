@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Funcky.Monads;
 using NodaTime;
 
@@ -5,8 +6,8 @@ namespace Pulsas.PacketProcessing.Contracts.Paths;
 
 public interface IReceptionReadManager
 {
-    Task<Option<ReadReceptionResult>> ReadReceptionAsync(
-        Guid id,
+    Task<ImmutableArray<ReadReceptionResult>> ReadReceptionsByIdAsync(
+        IReadOnlyList<Guid> ids,
         CancellationToken cancellationToken
     );
 

@@ -67,6 +67,33 @@ public partial class PathAssessmentIntegrationTests(ITestOutputHelper output)
             }
         }
 
+        commandTimes.Clear();
+        var observerStopwatch = Stopwatch.StartNew();
+        var activity = ObserverActivityResult(
+            await PostObserverActivityQueryAsync(
+                client,
+                ObserverActivityQuery,
+                observerId.ToString(),
+                end.AddDays(-QualificationDays),
+                end,
+                null,
+                token
+            )
+        );
+        var observerElapsed = observerStopwatch.Elapsed;
+        var observerReceptions = QualificationDays * ReceptionsPerDay / 8;
+        Assert.Equal(observerReceptions, activity.GetProperty("receptionCount").GetInt64());
+        var buckets = activity.GetProperty("buckets");
+        Assert.InRange(buckets.GetArrayLength(), 1, 120);
+        Assert.Equal(
+            observerReceptions,
+            buckets.EnumerateArray().Sum(bucket => bucket.GetProperty("receptionCount").GetInt64())
+        );
+        Assert.Equal(3, commandTimes.Count);
+        output.WriteLine(
+            $"observerActivitySummary 30d: {observerReceptions} rows, {commandTimes.Count} SQL reads, max SQL {commandTimes.Max().TotalMilliseconds:F1} ms, HTTP {observerElapsed.TotalMilliseconds:F1} ms"
+        );
+
         async Task MeasureAsync(
             string root,
             string query,

@@ -10,31 +10,11 @@ public record MeshTrafficTrend(
     Instant From,
     Instant To,
     int IntervalSeconds,
-    [property: ListSize(AssumedSize = MeshTrafficTrend.MaximumBuckets)]
+    [property: ListSize(AssumedSize = TrafficBuckets.MaximumBuckets)]
         ImmutableArray<MeshTrafficTrendBucket> Buckets
 )
 {
-    internal const int MaximumBuckets = 120;
-    private static readonly int[] Intervals =
-    [
-        60,
-        300,
-        900,
-        1800,
-        3600,
-        7200,
-        14400,
-        28800,
-        43200,
-        86400,
-    ];
-
     public MeshTrafficHistoryCoverage HistoryCoverage => MeshTrafficHistoryCoverage.Unknown;
-
-    internal static int SelectInterval(Instant from, Instant to) =>
-        Intervals.First(seconds =>
-            BinIndex(to - Duration.Epsilon, seconds) - BinIndex(from, seconds) + 1 <= MaximumBuckets
-        );
 
     internal static ImmutableArray<MeshTrafficTrendBucket> BuildBuckets(
         Instant from,
@@ -45,16 +25,13 @@ public record MeshTrafficTrend(
     {
         var indexed = rows.ToDictionary(row => row.Start);
         var buckets = ImmutableArray.CreateBuilder<MeshTrafficTrendBucket>();
-        var width = Duration.FromSeconds(seconds);
-        var start = Instant.FromUnixTimeSeconds(BinIndex(from, seconds) * seconds);
-        while (start < to)
+        foreach (var (start, lower, upper) in TrafficBuckets.Enumerate(from, to, seconds))
         {
-            var end = to - start <= width ? to : start + width;
             var row = indexed.GetValueOrDefault(start);
             buckets.Add(
                 new(
-                    start < from ? from : start,
-                    end,
+                    lower,
+                    upper,
                     row?.ReceptionCount ?? 0,
                     row?.WirePacketCount ?? 0,
                     row?.SharedPayloadCount ?? 0,
@@ -62,16 +39,8 @@ public record MeshTrafficTrend(
                     Signal(row?.Rssi)
                 )
             );
-            start = end;
         }
         return buckets.ToImmutable();
-    }
-
-    // Integer division rounds toward zero; bins must floor before the Unix epoch too.
-    private static long BinIndex(Instant time, int seconds)
-    {
-        var unix = time.ToUnixTimeSeconds();
-        return unix / seconds - (unix % seconds < 0 ? 1 : 0);
     }
 
     private static MeshTrafficSignalSummary Signal(SignalSummary? row) =>
