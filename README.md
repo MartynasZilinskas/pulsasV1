@@ -46,6 +46,34 @@ Ctrl+C stops the stack. PostgreSQL and Drizzle data stay in
 password does not update an initialized database. Do not delete volumes to fix
 authentication. Drizzle has database write access.
 
+### Local Web foundation
+
+The React/Vite project in `projects/Web` uses the Node version pinned in `mise.toml`.
+Install its locked dependencies before starting Aspire; AppHost does not install them.
+
+```sh
+(cd projects/Web && mise exec -- npm ci --ignore-scripts)
+./aspire.sh run -- --Web:ShowcaseOnly=true
+```
+
+Aspire starts `web` at `http://127.0.0.1:5173` in either run mode. The command above
+starts only Web and the Aspire dashboard, without PostgreSQL, migrations, or MQTT.
+Open [Kitchen Sink](http://127.0.0.1:5173/kitchen-sink) to try node roles and
+modifiers, compare compact packet and route badges, inspect packet paths with
+seven indicator styles, and browse channel icons and the mesh logo. In Packet
+traffic, zoom into a time range to update both the histogram and table. Open a
+row to view the reception details, or scroll the table for older receptions.
+The full-range table also demonstrates live feed markers with sample events.
+The showcase uses fixtures only; it does not connect to Gateway.
+The local Web resource is not published.
+
+With the Web resource running, use `mise exec -- npm run test:browser` from
+`projects/Web` to check startup, keyboard and touch interaction, and UI SDK agent
+actions. The tests use local Chromium (`/usr/bin/chromium` by default, or
+`CHROMIUM_EXECUTABLE`), without downloading a browser. Set
+`PULSAS_WEB_TEST_PORT` to test an isolated Vite development instance on another
+loopback port.
+
 ## Reception detail in GraphQL
 
 To enable read-only reception lookup on a trusted local development instance:

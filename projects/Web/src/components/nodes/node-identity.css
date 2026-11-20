@@ -1,0 +1,41 @@
+@import '../ui/theme.css';
+
+.ks-avatar {
+  --ks-avatar-size: 2.5rem;
+  --ks-avatar-glyph: 1.5rem;
+  --ks-avatar-mark: 0.9375rem;
+  box-sizing: border-box;
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: var(--ks-avatar-size);
+  block-size: var(--ks-avatar-size);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--ks-tone-ink);
+  background: var(--ks-tone-fill);
+}
+.ks-avatar[data-size='marker'] { --ks-avatar-size: 1.5rem; --ks-avatar-glyph: 1rem; --ks-avatar-mark: 0.75rem; }
+.ks-avatar[data-size='display'] { --ks-avatar-size: 4rem; --ks-avatar-glyph: 2rem; --ks-avatar-mark: 1.375rem; border-width: 2px; }
+.ks-avatar-face > .ks-glyph { inline-size: var(--ks-avatar-glyph); block-size: var(--ks-avatar-glyph); }
+.ks-avatar-mark {
+  box-sizing: border-box;
+  position: absolute;
+  display: grid;
+  place-items: center;
+  inline-size: var(--ks-avatar-mark);
+  block-size: var(--ks-avatar-mark);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ks-stage, var(--ks-ground));
+  color: var(--ks-tone-ink);
+  background: var(--ks-tone-fill);
+}
+.ks-avatar-mark > .ks-glyph { inline-size: 82%; block-size: 82%; }
+.ks-avatar-observer { inset-inline-end: -0.125rem; inset-block-end: -0.125rem; }
+.ks-avatar-warning { inset-inline-start: -0.125rem; inset-block-start: -0.125rem; }
+
+.ks-role-badge { --ks-badge-edge: currentColor; }
+.ks-badge-modifiers { display: inline-flex; gap: 0.25rem; padding-inline-start: 0.25rem; border-inline-start: 1px solid currentColor; }
+.ks-badge-modifiers > [data-tone] { color: var(--ks-tone-ink); }

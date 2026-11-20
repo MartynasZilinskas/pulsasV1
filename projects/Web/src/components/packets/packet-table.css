@@ -1,0 +1,157 @@
+@import '../ui/theme.css';
+
+.packet-reception-table-scroll {
+  box-sizing: border-box;
+  position: relative;
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: clamp(16rem, 53vh, 28rem);
+  overflow: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scroll-padding-block-start: 2.25rem;
+  background: var(--ks-paper);
+  color: var(--ks-ink);
+}
+.packet-reception-table-scroll:focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 2px; }
+
+.packet-reception-table {
+  inline-size: 100%;
+  min-inline-size: 39rem;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: 0.8125rem/1.2 var(--ks-sans);
+  text-align: start;
+}
+.packet-col-code { inline-size: 5.75rem; }
+.packet-col-type { inline-size: 7rem; }
+.packet-col-route { inline-size: 9.5rem; }
+.packet-col-region { inline-size: 4.25rem; }
+.packet-col-age { inline-size: 5rem; }
+.packet-reception-table thead { position: sticky; inset-block-start: 0; z-index: 2; }
+.packet-reception-table :is(th, td) {
+  box-sizing: border-box;
+  padding: 0 0.625rem;
+  border-block-end: 1px solid var(--ks-rule);
+  text-align: start;
+}
+.packet-reception-table :is(th, td):not(:last-child) { border-inline-end: 1px solid var(--ks-rule); }
+.packet-reception-table th {
+  block-size: 2.25rem;
+  color: var(--ks-muted);
+  background: var(--ks-ground);
+  font-size: 0.75rem;
+  font-weight: 660;
+}
+.packet-reception-row td { height: 40px; white-space: nowrap; }
+.packet-reception-row:focus-within td { background: var(--ks-ground); }
+@media (hover: hover) {
+  .packet-reception-row:hover td { background: var(--ks-ground); }
+}
+.packet-reception-row[data-activatable] td { cursor: pointer; }
+.packet-reception-row[data-activatable] .ks-badge-tooltip { cursor: auto; }
+.packet-reception-row[data-selected] td { background: var(--ks-accent-wash); }
+.packet-reception-table .packet-reception-table-spacer td { padding: 0; border: 0; }
+
+.packet-feed-status { --packet-row-accent: var(--ks-tone-ink); }
+.packet-feed-status td { height: 40px; background: var(--ks-ground); }
+.packet-feed-status[data-tone='amber'] td { background: var(--ks-tone-fill); }
+.packet-feed-status-content {
+  position: sticky;
+  inset-inline-start: 0.625rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  inline-size: max-content;
+  color: var(--ks-tone-ink);
+  white-space: nowrap;
+}
+.packet-feed-status-content strong { font-weight: 660; }
+.packet-feed-status-content time {
+  padding-inline-start: 0.5rem;
+  border-inline-start: 1px solid var(--ks-rule);
+  color: var(--ks-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.packet-reception-table .ks-badge { max-block-size: 1.75rem; flex-wrap: nowrap; padding: 0.125rem 0.3125rem; font-size: 0.75rem; }
+.packet-reception-table .ks-badge .ks-glyph { inline-size: 0.75rem; block-size: 0.75rem; }
+.packet-reception-table .ks-route-badge { gap: 0.1875rem; border: 0; background: transparent; padding-inline: 0; }
+.packet-reception-table .ks-route-label { flex: none; gap: 0.1875rem; }
+.packet-reception-table .ks-route-badge code {
+  display: block;
+  min-inline-size: 0;
+  padding-inline: 0.125rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.packet-reception-table .packet-reception-type .ks-badge { border-color: transparent; background: transparent; padding-inline: 0; }
+.packet-reception-table td:has([data-tone='blue']) { background: #e7f0fa; }
+.packet-reception-table td:has(.ks-type-badge[data-tone='green']) { background: #e5f4eb; }
+.packet-reception-table td:has([data-tone='violet']) { background: #f0eaf9; }
+.packet-reception-table td:has([data-tone='amber']) { background: #faf0dc; }
+:is(.packet-reception-row[data-selected], .packet-feed-status) td:first-child { position: relative; }
+:is(.packet-reception-row[data-selected], .packet-feed-status) td:first-child::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-inline-start: 3px solid var(--packet-row-accent, var(--ks-accent));
+  pointer-events: none;
+}
+
+.packet-reception-code, .packet-reception-table-action {
+  min-block-size: 1.75rem;
+  max-inline-size: 100%;
+  padding: 0.25rem 0;
+  border: 0;
+  border-radius: 0.1875rem;
+  color: var(--ks-accent);
+  background: transparent;
+  font: 625 0.75rem/1.2 var(--ks-mono);
+  cursor: pointer;
+}
+.packet-reception-code {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 2rem;
+  overflow: hidden;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.packet-reception-table-action { padding-inline: 0.5rem; font-family: var(--ks-sans); }
+.packet-reception-table-action[data-disabled] { color: var(--ks-muted); cursor: default; }
+@media (hover: hover) {
+  .packet-reception-code:hover { background: var(--ks-accent-wash); }
+  .packet-reception-table-action:not([data-disabled]):hover { text-decoration: underline; text-underline-offset: 0.18em; }
+}
+:is(.packet-reception-code, .packet-reception-table-action):focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 2px; }
+.packet-reception-summary { display: block; overflow: hidden; text-overflow: ellipsis; }
+.packet-reception-copy { display: inline-block; max-inline-size: 100%; vertical-align: middle; cursor: text; }
+.packet-reception-age { color: var(--ks-muted); font-variant-numeric: tabular-nums; }
+.packet-reception-table-message td { block-size: 2.75rem; }
+.packet-reception-table-message { color: var(--ks-muted); }
+.packet-reception-table-tail {
+  position: sticky;
+  inset-inline-start: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.75rem;
+  padding: 0.25rem 0.625rem;
+  color: var(--ks-muted);
+  font-size: 0.8125rem;
+}
+.packet-reception-table-tail [role='alert'] { color: var(--ks-ink); }
+
+@media (forced-colors: active) {
+  .packet-reception-row[data-selected] td { outline: 1px solid Highlight; outline-offset: -1px; }
+  :is(.packet-reception-row[data-selected], .packet-feed-status) td:first-child::before { border-color: Highlight; }
+}

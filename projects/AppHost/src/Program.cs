@@ -2,6 +2,21 @@ using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
+if (builder.ExecutionContext.IsRunMode)
+{
+    builder
+        .AddExecutable("web", "mise", "../Web", "exec", "--", "npm", "run", "dev")
+        .WithHttpEndpoint(port: 5173, targetPort: 5173, env: "PORT", isProxied: false)
+        .WithEndpoint("http", endpoint => endpoint.TargetHost = "127.0.0.1")
+        .WithHttpHealthCheck("/health");
+
+    if (builder.Configuration.GetValue<bool>("Web:ShowcaseOnly"))
+    {
+        await builder.Build().RunAsync();
+        return;
+    }
+}
+
 // Aspire generates the password once and retains it in local user secrets.
 var postgres = builder
     .AddPostgres("postgres")

@@ -1,0 +1,35 @@
+@layer ui-sdk;
+
+:root {
+  --ks-ground: #f6f8f7;
+  --ks-paper: #fff;
+  --ks-ink: #182420;
+  --ks-muted: #53625b;
+  --ks-rule: #d8e1dc;
+  --ks-control-edge: #798980;
+  --ks-accent: #165e47;
+  --ks-accent-wash: #e5f2eb;
+  --ks-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  --ks-sans: system-ui, sans-serif;
+  --ks-mark-fill: var(--ks-paper);
+}
+
+[data-tone='neutral'] { --ks-tone-fill: #eef2f1; --ks-tone-ink: #42514c; }
+[data-tone='green'] { --ks-tone-fill: #e5f4eb; --ks-tone-ink: #1d5c43; }
+[data-tone='violet'] { --ks-tone-fill: #f0eaf9; --ks-tone-ink: #574184; }
+[data-tone='blue'] { --ks-tone-fill: #e7f0fa; --ks-tone-ink: #294e7e; }
+[data-tone='amber'] { --ks-tone-fill: #faf0dc; --ks-tone-ink: #684a15; }
+[data-theme='dark'] [data-tone='neutral'] { --ks-tone-fill: #2c3d37; --ks-tone-ink: #d7e6df; }
+[data-theme='dark'] [data-tone='green'] { --ks-tone-fill: #233f34; --ks-tone-ink: #a9e2c3; }
+[data-theme='dark'] [data-tone='violet'] { --ks-tone-fill: #3a2e50; --ks-tone-ink: #dec8ff; }
+[data-theme='dark'] [data-tone='blue'] { --ks-tone-fill: #293d55; --ks-tone-ink: #bddaff; }
+[data-theme='dark'] [data-tone='amber'] { --ks-tone-fill: #4a3823; --ks-tone-ink: #f7d38c; }
+
+.ks-glyph { display: block; flex: none; inline-size: 1rem; block-size: 1rem; }
+.ks-mesh-mark, .ks-lucide-glyph { display: block; flex: none; }
+.ks-visually-hidden { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ks-public-key { font-family: var(--ks-mono); overflow-wrap: anywhere; }
+
+@media (forced-colors: active) {
+  :root { --ks-focus: Highlight; }
+}
