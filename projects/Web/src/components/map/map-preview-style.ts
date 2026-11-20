@@ -152,23 +152,23 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
         'circle-radius': 5, 'circle-color': flowColor, 'circle-stroke-color': casing, 'circle-stroke-width': 2,
       } },
       { id: 'preview-raised-confidence-ring', source: chosenSource, type: 'circle', filter: isEvidence, paint: {
-        'circle-radius': ['step', ['zoom'], 17, roleZoom, 15], 'circle-color': casing, 'circle-stroke-color': casing, 'circle-stroke-width': 4,
+        'circle-radius': 15, 'circle-color': casing, 'circle-stroke-color': casing, 'circle-stroke-width': 4,
       } },
       { id: 'preview-raised-confidence-ink', source: chosenSource, type: 'circle', filter: isEvidence, paint: {
-        'circle-radius': ['step', ['zoom'], 16, roleZoom, 14], 'circle-color': casing, 'circle-stroke-color': [...confidenceInk], 'circle-stroke-width': 3,
+        'circle-radius': 14, 'circle-color': casing, 'circle-stroke-color': [...confidenceInk], 'circle-stroke-width': 3,
       } },
       { id: raisedLayer, source: chosenSource, type: 'circle', paint: {
-        'circle-radius': ['step', ['zoom'], ['case', isEvidence, 12, 16], roleZoom, ['case', isEvidence, 18, 22]],
+        'circle-radius': ['case', isEvidence, 18, 22],
         'circle-color': ['step', ['zoom'], roleFill, labelZoom, casing],
         'circle-stroke-color': roleEdge, 'circle-stroke-width': ['case', isEvidence, 0, 4],
         // Retain the selected hit area without covering the compact confidence ring.
-        'circle-opacity': ['step', ['zoom'], 1, roleZoom, 0],
-        'circle-stroke-opacity': ['step', ['zoom'], 1, roleZoom, 0],
+        'circle-opacity': 0,
+        'circle-stroke-opacity': 0,
       } },
-      { id: 'preview-raised-ordinary-ring', source: chosenSource, type: 'circle', minzoom: roleZoom, filter: ['!', isEvidence], paint: {
+      { id: 'preview-raised-ordinary-ring', source: chosenSource, type: 'circle', filter: ['!', isEvidence], paint: {
         'circle-radius': 12.5, 'circle-color': casing, 'circle-stroke-color': roleEdge, 'circle-stroke-width': 2,
       } },
-      { id: 'preview-raised-role-face', source: chosenSource, type: 'circle', minzoom: roleZoom, paint: compactRoleFace },
+      { id: 'preview-raised-role-face', source: chosenSource, type: 'circle', paint: compactRoleFace },
       { id: 'preview-raised-role', source: chosenSource, type: 'symbol', layout: themedRoleGlyphLayout },
       { id: raisedLabelLayer, source: chosenSource, type: 'symbol', layout: {
         // MapLibre infers weight from the first family; extending the generic sans-serif name makes Canvas reject its font string.
@@ -179,10 +179,10 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
           ['case', isEvidence, ['literal', [0, 22 / 12]], ['literal', [0, 20 / 12]]]],
       }, paint: { 'text-color': theme === 'light' ? white : palettes.light.ink, 'text-opacity': nameOpacity, 'icon-opacity': nameOpacity } },
       { id: raisedHopLayer, source: chosenSource, type: 'symbol', filter: isEvidence, layout: {
-        ...hopLayout, 'text-offset': ['step', ['zoom'], ['literal', [0, -17.5 / 12]], roleZoom, ['literal', [0, -15.5 / 12]]],
+        ...hopLayout, 'text-offset': [0, -15.5 / 12],
       }, paint: { ...textPaint, 'text-color': [...confidenceInk] } },
       { id: raisedAmbiguousLayer, source: chosenSource, type: 'symbol', filter: ['all', isEvidence, isAmbiguous], layout: {
-        ...ambiguityLayout, 'text-offset': ['step', ['zoom'], ['literal', [17.5 / 14, 0]], roleZoom, ['literal', [15.5 / 14, 0]]],
+        ...ambiguityLayout, 'text-offset': [15.5 / 14, 0],
       }, paint: { ...textPaint, 'text-color': weakColor } },
     ],
   }
