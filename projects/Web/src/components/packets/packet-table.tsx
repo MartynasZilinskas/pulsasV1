@@ -33,12 +33,19 @@ const statusPresentation = {
 const columns = ['Code', 'Type', 'Transport', 'Summary', 'Region', 'Age']
 const rowHeight = 40
 const overscan = 6
-const loadAhead = 160
+const loadAhead = 16 * rowHeight
 const clickSlop = 6
 const relative = new Intl.RelativeTimeFormat(undefined, { style: 'narrow', numeric: 'auto' })
 
 function isStatusRow(row: PacketTableRow | PacketTableStatusRow): row is PacketTableStatusRow {
   return 'status' in row
+}
+
+function rowTabStop(row: HTMLTableRowElement, position: 'first' | 'last') {
+  const rowStop = row.tabIndex >= 0 ? row : undefined
+  if (position === 'first' && rowStop) return rowStop
+  const buttons = row.querySelectorAll<HTMLButtonElement>('button:not(:disabled):not([tabindex="-1"])')
+  return buttons[position === 'first' ? 0 : buttons.length - 1] ?? rowStop
 }
 
 function ageLabel(timestamp: string, referenceTime: string) {
@@ -49,7 +56,7 @@ function ageLabel(timestamp: string, referenceTime: string) {
   return relative.format(-Math.floor(seconds / 86400), 'day')
 }
 
-export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLabel = timeZone, resetKey, hasMore, isLoadingMore, loadMore, selectedId, onActivate, isLoading = false, error, retry }: {
+export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLabel = timeZone, resetKey, hasMore, isLoadingMore, loadMore, selectedId, onActivate, onNavigate, selectionControls, isLoading = false, error, retry }: {
   rows: readonly (PacketTableRow | PacketTableStatusRow)[]
   referenceTime: string
   timeZone?: string
@@ -60,6 +67,8 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   loadMore: () => void
   selectedId?: string
   onActivate?: (row: PacketTableRow) => void
+  onNavigate?: (row: PacketTableRow) => void
+  selectionControls?: string
   isLoading?: boolean
   error?: string
   retry?: () => void
@@ -68,11 +77,12 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   const scroller = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLTableSectionElement>(null)
   const tail = useRef<HTMLDivElement>(null)
-  const loadButton = useRef<HTMLButtonElement>(null)
+  const tailAction = useRef<HTMLButtonElement>(null)
   const lastRequested = useRef<{ key: string; count: number } | null>(null)
   const loading = useRef(false)
   const previousResetKey = useRef(resetKey)
   const previouslyLoading = useRef(isLoadingMore)
+  const committedSelectedId = useRef(selectedId)
   const [viewport, setViewport] = useState({ top: 0, height: 440 })
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const timestamp = useMemo(() => createTimestampFormatter(timeZone), [timeZone])
@@ -88,6 +98,15 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
     setViewport((previous) => previous.top === top && previous.height === height ? previous : { top, height })
   }, [])
 
+  const scrollRowIntoView = useCallback((root: HTMLDivElement, index: number) => {
+    const headHeight = head.current?.offsetHeight ?? 0
+    const rowTop = index * rowHeight
+    if (rowTop < root.scrollTop) root.scrollTop = rowTop
+    else if (rowTop + rowHeight + headHeight > root.scrollTop + root.clientHeight) {
+      root.scrollTop = rowTop + rowHeight + headHeight - root.clientHeight
+    }
+  }, [])
+
   useLayoutEffect(() => {
     if (previousResetKey.current !== resetKey) {
       previousResetKey.current = resetKey
@@ -98,6 +117,17 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
     }
     readViewport()
   }, [resetKey, readViewport])
+
+  useLayoutEffect(() => {
+    const previous = committedSelectedId.current
+    committedSelectedId.current = selectedId
+    const root = scroller.current
+    if (!root || previous === undefined || selectedId === undefined || previous === selectedId) return
+    const index = rows.findIndex((row) => !isStatusRow(row) && row.id === selectedId)
+    if (index < 0) return
+    scrollRowIntoView(root, index)
+    readViewport()
+  }, [readViewport, rows, scrollRowIntoView, selectedId])
 
   useEffect(() => {
     const root = scroller.current
@@ -158,19 +188,14 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
     const root = scroller.current
     const row = rows[index]
     if (!root || !row || isStatusRow(row)) return
-    const headHeight = head.current?.offsetHeight ?? 0
-    const rowTop = index * rowHeight
-    if (rowTop < root.scrollTop) root.scrollTop = rowTop
-    else if (rowTop + rowHeight + headHeight > root.scrollTop + root.clientHeight) {
-      root.scrollTop = rowTop + rowHeight + headHeight - root.clientHeight
-    }
+    scrollRowIntoView(root, index)
     flushSync(() => { setFocusedId(row.id); readViewport() })
-    const target = root.querySelector(`tr[data-row-index="${index}"]`)
-    const controls = target?.querySelectorAll<HTMLButtonElement>('button')
-    const button = controls?.[position === 'first' ? 0 : controls.length - 1]
-    button?.focus({ preventScroll: true })
-    if (button) {
-      const focus = button.getBoundingClientRect()
+    const reception = root.querySelector<HTMLTableRowElement>(`tr[data-reception-id][data-row-index="${index}"]`)
+    if (!reception) return
+    const target = rowTabStop(reception, position)
+    target?.focus({ preventScroll: true })
+    if (target && target !== reception) {
+      const focus = target.getBoundingClientRect()
       const frame = root.getBoundingClientRect()
       if (focus.left < frame.left) root.scrollLeft += focus.left - frame.left - 4
       if (focus.right > frame.right) root.scrollLeft += focus.right - frame.right + 4
@@ -178,41 +203,31 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   }
 
   function onTableKeys(event: KeyboardEvent<HTMLDivElement>) {
-    const target = event.target as Element
-    const row = target.closest<HTMLTableRowElement>('[data-reception-id]')
+    const target = event.target
+    if (!(target instanceof Element)) return
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
-    if (event.key === 'Tab' && !event.shiftKey && target === scroller.current) {
-      const next = nextPacketIndex(start - 1, 1)
-      if (next >= end) {
-        event.preventDefault()
-        focusRow(next, 'first')
-      }
-    }
-    if (event.key === 'Tab' && event.shiftKey && target === loadButton.current) {
-      const last = nextPacketIndex(rows.length, -1)
-      if (last >= 0) {
-        event.preventDefault()
-        focusRow(last, 'last')
-      }
-    }
-    if (!row) return
-    const index = Number(row.dataset.rowIndex)
-    const buttons = row.querySelectorAll('button')
+    const row = target.closest<HTMLTableRowElement>('tr[data-reception-id]')
     if (event.key === 'Tab') {
-      const boundary = event.shiftKey ? buttons[0] : buttons[buttons.length - 1]
-      if (target === boundary) {
-        const next = nextPacketIndex(index, event.shiftKey ? -1 : 1)
-        if (next >= 0) {
-          event.preventDefault()
-          focusRow(next, event.shiftKey ? 'last' : 'first')
-        }
+      const backward = event.shiftKey
+      let from: number
+      if (!backward && target === scroller.current) from = Math.floor(scroller.current.scrollTop / rowHeight) - 1
+      else if (backward && target === tailAction.current) from = rows.length
+      else if (row && target === rowTabStop(row, backward ? 'first' : 'last')) from = Number(row.dataset.rowIndex)
+      else return
+      const next = nextPacketIndex(from, backward ? -1 : 1)
+      if (next >= 0) {
+        event.preventDefault()
+        focusRow(next, backward ? 'last' : 'first')
       }
+      return
     }
-    if (target.hasAttribute('data-packet-code') && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
-      const next = nextPacketIndex(index, event.key === 'ArrowUp' ? -1 : 1)
+    if (row && target === row && !event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      const next = nextPacketIndex(Number(row.dataset.rowIndex), event.key === 'ArrowUp' ? -1 : 1)
       if (next >= 0) {
         event.preventDefault()
         focusRow(next, 'first')
+        const nextRow = rows[next]
+        if (nextRow && !isStatusRow(nextRow)) onNavigate?.(nextRow)
       }
     }
   }
@@ -245,7 +260,8 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
             if (isStatusRow(row)) return <PacketStatusEntry key={`status:${row.id}`} leading={spacer(gap)} row={row} index={index}
               clock={clock} timestamp={timestamp} timeZoneLabel={timeZoneLabel} />
             return <PacketTableEntry key={`packet:${row.id}`} leading={spacer(gap)} row={row} index={index} referenceTime={referenceTime}
-              arrivalLabel={`${timestamp.format(Date.parse(row.arrivedAt))} (${timeZoneLabel})`} selected={selectedId === row.id} onActivate={onActivate} />
+              arrivalLabel={`${timestamp.format(Date.parse(row.arrivedAt))} (${timeZoneLabel})`} selected={selectedId === row.id}
+              onActivate={onActivate} selectionControls={selectionControls} />
           })}
           {spacer(rows.length - cursor)}
           {!rows.length && !hasMore && !isLoading && !error && <tr className="packet-reception-table-message">
@@ -254,9 +270,9 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
         </tbody>
       </table>
       {(rows.length > 0 || isLoading || hasMore || error) && <div className="packet-reception-table-tail" ref={tail}>
-        {error ? <><span role="alert">{error}</span>{retry && <Button className="packet-reception-table-action" onClick={retry}>Retry</Button>}</> :
+        {error ? <><span role="alert">{error}</span>{retry && <Button ref={tailAction} className="packet-reception-table-action" onClick={retry}>Retry</Button>}</> :
           isLoading ? <span role="status">Loading receptions…</span> :
-            <Button ref={loadButton} className="packet-reception-table-action" aria-label={hasMore ? 'Load older receptions' : undefined}
+            <Button ref={tailAction} className="packet-reception-table-action" aria-label={hasMore ? 'Load older receptions' : undefined}
               disabled={isLoadingMore || !hasMore} focusableWhenDisabled={isLoadingMore || !hasMore}
               onClick={() => requestMore(false)}>
               {isLoadingMore ? 'Loading older receptions…' : hasMore ? 'Load older receptions' : 'End of available history.'}
@@ -295,13 +311,14 @@ function isPrimaryUnmodifiedClick(event: MouseEvent) {
   return !event.defaultPrevented && event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
 }
 
-function passiveCell(row: HTMLTableRowElement, target: EventTarget) {
+function passiveRowTarget(row: HTMLTableRowElement, target: EventTarget) {
+  if (target === row) return row
   if (!(target instanceof Element) || !row.contains(target) || target.closest('button, [data-slot="tooltip-content"], .packet-reception-copy')) return null
   const cell = target.closest('td')
   return cell?.parentElement === row ? cell : null
 }
 
-function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, selected, onActivate }: {
+function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, selected, onActivate, selectionControls }: {
   leading: ReactNode
   row: PacketTableRow
   index: number
@@ -309,16 +326,25 @@ function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, se
   arrivalLabel: string
   selected: boolean
   onActivate?: (row: PacketTableRow) => void
+  selectionControls?: string
 }) {
-  const press = useRef<{ cell: HTMLTableCellElement; pointerId: number; x: number; y: number } | null>(null)
+  const press = useRef<{ target: HTMLTableRowElement | HTMLTableCellElement; pointerId: number; x: number; y: number } | null>(null)
   const cancelPress = () => { press.current = null }
 
   return <>{leading}<tr className="packet-reception-row" data-reception-id={row.id} data-row-index={index}
     data-selected={selected ? '' : undefined} data-activatable={onActivate ? '' : undefined} aria-rowindex={index + 2}
+    tabIndex={onActivate ? 0 : undefined} aria-current={selected || undefined} aria-controls={selected ? selectionControls : undefined}
+    aria-description={onActivate ? 'Press Enter or Space to view reception details.' : undefined}
+    onKeyDown={onActivate && ((event) => {
+      if (event.target !== event.currentTarget || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      if (!event.repeat) onActivate(row)
+    })}
     onPointerDown={onActivate && ((event) => {
-      const cell = passiveCell(event.currentTarget, event.target)
-      press.current = cell && event.isPrimary && isPrimaryUnmodifiedClick(event)
-        ? { cell, pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      const target = passiveRowTarget(event.currentTarget, event.target)
+      press.current = target && event.isPrimary && isPrimaryUnmodifiedClick(event)
+        ? { target, pointerId: event.pointerId, x: event.clientX, y: event.clientY }
         : null
     })}
     onPointerMove={onActivate && ((event) => {
@@ -335,15 +361,17 @@ function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, se
     onClick={onActivate && ((event) => {
       const down = press.current
       cancelPress()
-      if (!down || !isPrimaryUnmodifiedClick(event) || event.detail === 0 ||
-        Math.hypot(event.clientX - down.x, event.clientY - down.y) > clickSlop ||
-        passiveCell(event.currentTarget, event.target) !== down.cell) return
-      const selection = event.currentTarget.ownerDocument.getSelection()
-      if (selection && !selection.isCollapsed && selection.getRangeAt(0).intersectsNode(event.currentTarget)) return
+      const target = passiveRowTarget(event.currentTarget, event.target)
+      if (!target || !isPrimaryUnmodifiedClick(event)) return
+      if (event.detail !== 0) {
+        if (!down || down.target !== target || Math.hypot(event.clientX - down.x, event.clientY - down.y) > clickSlop) return
+        const selection = event.currentTarget.ownerDocument.getSelection()
+        if (selection && !selection.isCollapsed && selection.getRangeAt(0).intersectsNode(event.currentTarget)) return
+      }
+      event.currentTarget.focus({ preventScroll: true })
       onActivate(row)
     })}>
-    <td>{onActivate ? <Button className="packet-reception-code" data-packet-code aria-label={`View reception ${row.code} · ${row.region} · ${arrivalLabel}`}
-      aria-haspopup="dialog" onClick={(event) => { if (isPrimaryUnmodifiedClick(event)) onActivate(row) }}>{row.code}</Button> : <code title={row.code}>{row.code}</code>}</td>
+    <td><code className="packet-reception-code" title={row.code}>{row.code}</code></td>
     <td className="packet-reception-type"><PacketTypeBadge code={row.packetType} /></td>
     <td><RouteBadge route={row.route} scope={row.scope} /></td>
     <td><span className="packet-reception-summary packet-reception-copy" title={row.summary}>{row.summary}</span></td>

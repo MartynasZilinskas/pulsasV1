@@ -416,14 +416,13 @@ test('feed markers span every column, stay in timeline order, and are skipped by
     const before = table.locator('tr[data-reception-id="reception-95-79"]')
     const after = table.locator('tr[data-reception-id="reception-95-78"]')
     assert.equal(await before.evaluate(node => node.nextElementSibling.dataset.feedStatus), 'resumed')
-    const code = (row) => row.getByRole('button', { name: /^View reception/ })
-    await code(before).press('ArrowDown')
-    assert.ok(await code(after).evaluate(node => node === document.activeElement))
+    await before.press('ArrowDown')
+    assert.ok(await after.evaluate(node => node === document.activeElement))
     await page.keyboard.press('ArrowUp')
-    assert.ok(await code(before).evaluate(node => node === document.activeElement))
+    assert.ok(await before.evaluate(node => node === document.activeElement))
     await before.getByRole('button').last().focus()
     await page.keyboard.press('Tab')
-    assert.ok(await code(after).evaluate(node => node === document.activeElement))
+    assert.ok(await after.evaluate(node => node === document.activeElement))
     await page.keyboard.press('Shift+Tab')
     assert.ok(await before.getByRole('button').last().evaluate(node => node === document.activeElement))
   })
@@ -447,7 +446,7 @@ test('scoped route badges show the full explanation and scope in the packet tabl
     await badge.hover()
     const tooltip = page.getByRole('tooltip')
     await tooltip.waitFor({ timeout: 3000 })
-    assert.equal(await page.getByRole('dialog', { name: /reception/i }).count(), 0)
+    assert.equal(await page.getByRole('region', { name: 'Reception details' }).count(), 0)
     assert.match(await tooltip.innerText(), /Transport direct.*Scope: #baltics/is)
     assert.doesNotMatch(await tooltip.innerText(), /with transport codes/i)
     assert.ok(await tooltip.evaluate(tip => tip.scrollWidth <= tip.clientWidth + 1), 'Tooltip text should wrap inside the box')
@@ -488,12 +487,11 @@ test('the route tooltip stays readable when tapped in the horizontally scrolled 
 test('clicking a passive cell opens its reception without stealing summary selection', async () => {
   await withWorkbench({}, async (page) => {
     const row = page.locator('tr[data-reception-id="reception-95-83"]')
-    const details = page.getByRole('dialog', { name: /reception/i })
+    const details = page.getByRole('region', { name: 'Reception details' })
     await row.getByText('Path trace · signal samples reported').dblclick()
     assert.ok(await page.evaluate(() => getSelection()?.toString()), 'Summary text should remain selectable')
     assert.equal(await details.count(), 0)
 
-    const opener = row.getByRole('button', { name: /^View reception A46F29 · KUN/i })
     const region = row.getByRole('cell', { name: 'KUN', exact: true })
     await region.click({ modifiers: ['Control'] })
     assert.equal(await details.count(), 0)
@@ -503,14 +501,100 @@ test('clicking a passive cell opens its reception without stealing summary selec
     assert.match(await details.innerText(), /Path trace · signal samples reported/)
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
     assert.match(await details.locator('time').innerText(), /15:59:49/)
-    assert.ok(await details.evaluate(node => node.contains(document.activeElement)))
+    assert.ok(await details.evaluate(node => !node.contains(document.activeElement)))
     await details.getByRole('button', { name: /close/i }).click()
     await details.waitFor({ state: 'hidden' })
-    assert.ok(await opener.evaluate(node => node === document.activeElement))
+    assert.ok(await row.evaluate(node => node === document.activeElement))
   })
 })
 
-test('a passive cell opens the same drawer on touch', async () => {
+test('the desktop inspector switches rows in place and stays open when the filter excludes a reception', async () => {
+  await withWorkbench({}, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const scroller = traffic.getByRole('region', { name: 'Reception list scroll area' })
+    const inspector = traffic.getByRole('region', { name: 'Reception details' })
+    const selected = scroller.locator('tr[data-selected]')
+    const first = scroller.locator('tr[data-reception-id="reception-95-83"]')
+    const second = scroller.locator('tr[data-reception-id="reception-95-82"]')
+    const staticCode = first.getByRole('cell', { name: 'A46F29', exact: true }).locator('code')
+
+    assert.equal(await staticCode.count(), 1, 'The Code cell contains static text')
+    assert.equal(await staticCode.textContent(), 'A46F29')
+    assert.ok(await staticCode.evaluate((node) => {
+      const { color, textDecorationLine } = getComputedStyle(node)
+      const accent = getComputedStyle(node).getPropertyValue('--ks-accent').trim()
+      const sample = document.createElement('span')
+      sample.style.color = accent
+      node.after(sample)
+      const accentColor = getComputedStyle(sample).color
+      sample.remove()
+      return !node.closest('a, button, [role="link"], [role="button"]') && !node.hasAttribute('tabindex') &&
+        textDecorationLine === 'none' && color === accentColor
+    }))
+    await staticCode.click()
+    await inspector.waitFor({ timeout: 5000 })
+    const original = await inspector.elementHandle()
+    const [listBounds, panelBounds] = await Promise.all([scroller.boundingBox(), inspector.boundingBox()])
+    assert.ok(listBounds && panelBounds && listBounds.x + listBounds.width <= panelBounds.x + 1,
+      'The inspector sits beside the table rather than covering it')
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    assert.ok(await first.evaluate((node) => node === document.activeElement))
+    assert.ok(await staticCode.evaluate((node) => !node.matches(':focus')))
+
+    await second.getByRole('cell', { name: 'VNO', exact: true }).click()
+    assert.ok(await inspector.evaluate((node, initial) => node === initial, original))
+    assert.ok(await second.evaluate((node) => node === document.activeElement))
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
+    assert.equal(await second.getAttribute('aria-current'), 'true')
+    assert.equal(await second.getAttribute('aria-haspopup'), null)
+    assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
+    await scroller.getByRole('columnheader', { name: 'Code' }).click()
+    assert.ok(await inspector.isVisible(), 'Clicking the table header keeps details open')
+    await second.getByRole('cell', { name: 'VNO', exact: true }).click()
+
+    const hasUniformBorder = (row, width) => {
+      const cells = Array.from(row.cells, (cell) => getComputedStyle(cell, '::before'))
+      const color = cells[0].borderBlockStartColor
+      const edge = (style, side) => style[`border${side}Width`] === width &&
+        style[`border${side}Style`] === 'solid' && style[`border${side}Color`] === color
+      return cells.every((cell) => edge(cell, 'BlockStart') && edge(cell, 'BlockEnd')) &&
+        edge(cells[0], 'InlineStart') && edge(cells.at(-1), 'InlineEnd')
+    }
+    assert.ok(await second.evaluate(hasUniformBorder, '1px'), 'Pointer selection has an even border across all cells')
+
+    await page.keyboard.press('ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-81')
+    assert.ok(await selected.evaluate((node) => node === document.activeElement && node.matches(':focus-visible')))
+    assert.ok(await selected.evaluate(hasUniformBorder, '2px'), 'Keyboard focus has a continuous, thicker row border')
+    assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:27.857Z')
+    await page.keyboard.press('ArrowUp')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
+    assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
+
+    const choose = traffic.getByRole('button', { name: 'Choose time range' })
+    await choose.click()
+    await traffic.getByRole('button', { name: 'Stage range' }).click()
+    await traffic.getByRole('button', { name: 'Zoom', exact: true }).click()
+    assert.ok(await inspector.evaluate((node, initial) => node === initial, original))
+    assert.match(await inspector.innerText(), /Outside the current filter/i)
+    assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
+    assert.equal(await selected.count(), 0)
+    await choose.focus()
+    await page.keyboard.press('Escape')
+    assert.ok(await inspector.isVisible(), 'Escape on a filter control does not close the inspector')
+
+    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    assert.doesNotMatch(await inspector.innerText(), /Outside the current filter/i)
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
+    await traffic.getByRole('button', { name: 'Go to reception details' }).press('Enter')
+    assert.ok(await inspector.evaluate((node) => node === document.activeElement))
+    await inspector.getByRole('button', { name: 'Close reception details' }).click()
+    await inspector.waitFor({ state: 'hidden' })
+    assert.ok(await second.evaluate((node) => node === document.activeElement))
+  })
+})
+
+test('a passive cell opens the narrow drawer and touch controls switch receptions', async () => {
   await withWorkbench({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, async (page) => {
     const row = page.locator('tr[data-reception-id="reception-95-82"]')
     await row.getByRole('cell', { name: 'VNO', exact: true }).tap()
@@ -519,22 +603,35 @@ test('a passive cell opens the same drawer on touch', async () => {
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
     const bounds = await details.boundingBox()
     assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 321, 'Drawer fits the 320px viewport')
+    assert.equal(await details.getAttribute('aria-modal'), 'true')
+    const previous = details.getByRole('button', { name: /previous/i })
+    const next = details.getByRole('button', { name: /next/i })
+    await previous.tap()
+    assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
+    assert.ok(await previous.isDisabled())
+    await next.tap()
+    assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
+    await next.tap()
+    assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:27.857Z')
   })
 })
 
 test('closing reception details focuses the table if the originating row has scrolled away', async () => {
   await withWorkbench({}, async (page) => {
     const scroller = page.getByRole('region', { name: 'Reception list scroll area' })
+    const table = scroller.getByRole('table', { name: 'Packet receptions', exact: true })
     const row = scroller.locator('tr[data-reception-id="reception-95-83"]')
-    await row.getByRole('button', { name: /^View reception/ }).click()
-    const details = page.getByRole('dialog', { name: /reception/i })
+    await row.getByRole('cell', { name: 'A46F29', exact: true }).click()
+    const details = page.getByRole('region', { name: 'Reception details' })
     await details.waitFor()
+    await details.getByRole('button', { name: 'Close reception details' }).focus()
     const scrollArea = page.locator('[data-packet-table-scroll]')
     await scrollArea.evaluate(node => { node.scrollTop = node.scrollHeight })
     await row.waitFor({ state: 'detached' })
     await page.keyboard.press('Escape')
     await details.waitFor({ state: 'hidden' })
     assert.ok(await scroller.evaluate(node => node === document.activeElement))
+    await assertMoreReceptions(page, table)
   })
 })
 
@@ -542,23 +639,22 @@ test('keyboard opens the exact reception and continues through virtualized rows 
   await withWorkbench({}, async (page) => {
     const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
     const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
-    const code = /^View reception A46F29 · /i
-    const duplicateCode = table.getByRole('button', { name: code })
+    const duplicateCode = table.getByRole('row').filter({ has: page.getByRole('cell', { name: 'A46F29', exact: true }) })
     const newest = duplicateCode.first()
-    const details = page.getByRole('dialog', { name: /reception/i })
+    const details = page.getByRole('region', { name: 'Reception details' })
     const selectedRow = traffic.locator('tr[data-selected]')
-    await newest.press('Enter')
+    await traffic.getByRole('region', { name: 'Reception list scroll area' }).focus()
+    await page.keyboard.press('Tab')
+    assert.ok(await newest.evaluate(node => node === document.activeElement))
+    await page.keyboard.press('Tab')
+    assert.ok(await newest.getByRole('button').first().evaluate(node => node === document.activeElement))
+    await page.keyboard.press('Shift+Tab')
+    assert.ok(await newest.evaluate(node => node === document.activeElement))
+    await page.keyboard.press('Enter')
     await details.waitFor()
     assert.equal(await selectedRow.getAttribute('data-reception-id'), 'reception-95-83')
-    const selectedStyles = await selectedRow.locator('td').evaluateAll(cells => {
-      const marker = getComputedStyle(cells[0], '::before')
-      return {
-        startMarker: parseFloat(marker.borderInlineStartWidth) > 0 && marker.insetInlineStart === '0px',
-        tintedCells: cells.every(cell => getComputedStyle(cell).backgroundColor !== 'rgba(0, 0, 0, 0)'),
-        typeShadow: getComputedStyle(cells[1]).boxShadow,
-      }
-    })
-    assert.deepEqual(selectedStyles, { startMarker: true, tintedCells: true, typeShadow: 'none' })
+    assert.ok(await selectedRow.locator('td').evaluateAll(cells =>
+      cells.every(cell => getComputedStyle(cell).backgroundColor !== 'rgba(0, 0, 0, 0)')))
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
     await page.keyboard.press('Escape')
     await details.waitFor({ state: 'hidden' })
@@ -575,7 +671,104 @@ test('keyboard opens the exact reception and continues through virtualized rows 
     assert.ok(await duplicateCode.nth(1).evaluate(node => node === document.activeElement))
     for (let index = 1; index < 24; index += 1) await page.keyboard.press('ArrowDown')
     assert.equal(await table.locator('tr:focus-within').getAttribute('aria-rowindex'), '29')
-    assert.ok(await table.getByRole('button', { name: /^View reception/ }).count() < 32)
+    assert.ok(await table.locator('tr[data-reception-id]').count() < 32)
+  })
+})
+
+test('arrow keys change the selected reception without leaving its details drawer', async () => {
+  await withWorkbench({ viewport: { width: 640, height: 800 } }, async (page) => {
+    const table = page.getByRole('table', { name: 'Packet receptions', exact: true })
+    const newest = table.locator('tr[data-reception-id="reception-95-83"]')
+    const details = page.getByRole('dialog', { name: 'Reception details' })
+    const selected = page.locator('tr[data-selected]')
+    const arrival = details.locator('time')
+
+    await newest.press('Enter')
+    await details.waitFor()
+    const drawer = await details.elementHandle()
+    const initialFocus = await page.evaluateHandle(() => document.activeElement)
+    assert.match(await details.ariaSnapshot(), /Up and Down arrow keys/)
+    const status = details.getByRole('status').filter({ hasText: /^Reception \d+ of \d+:/ })
+    await page.keyboard.press('ArrowUp')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-83')
+    await page.keyboard.press('ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
+    assert.equal(await arrival.getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
+    assert.match(await status.innerText(), /A46F29.*VNO/)
+    assert.ok(await details.evaluate((node, original) => node === original, drawer))
+    assert.ok(await initialFocus.evaluate((node) => node === document.activeElement))
+
+    await page.keyboard.press('Control+ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
+    await page.keyboard.press('ArrowUp')
+    assert.equal(await arrival.getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
+
+    for (let index = 0; index < 5; index += 1) await page.keyboard.press('ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-78')
+    const close = details.getByRole('button', { name: 'Close reception details' })
+    await close.focus()
+    assert.ok(await close.evaluate((node) => node === document.activeElement))
+    await page.keyboard.press('ArrowUp')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-79')
+    assert.ok(await close.evaluate((node) => node === document.activeElement))
+
+    await page.keyboard.press('Escape')
+    await details.waitFor({ state: 'hidden' })
+    const current = table.locator('tr[data-reception-id="reception-95-79"]')
+    assert.ok(await current.evaluate((node) => node === document.activeElement))
+  })
+})
+
+test('inspector navigation preloads older receptions before reaching the last loaded row', async () => {
+  await withWorkbench({}, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const scroller = traffic.getByRole('region', { name: 'Reception list scroll area' })
+    const newest = table.locator('tr[data-reception-id="reception-95-83"]')
+    const oldest = table.locator('tr[data-reception-id="reception-95-52"]')
+    const selected = table.locator('tr[data-selected]')
+    const scrollPosition = () => scroller.evaluate((node) => ({ top: node.scrollTop, left: node.scrollLeft, pageTop: window.scrollY }))
+    const selectedRowIsVisible = () => selected.evaluate((row) => {
+      const frame = row.closest('[data-packet-table-scroll]')
+      const bounds = row.getBoundingClientRect()
+      return bounds.top >= row.closest('table').tHead.getBoundingClientRect().bottom - 1 &&
+        bounds.bottom <= frame.getBoundingClientRect().top + frame.clientHeight + 1
+    })
+    await scroller.scrollIntoViewIfNeeded()
+    assert.equal(await oldest.count(), 0)
+
+    await newest.press('Enter')
+    const details = page.getByRole('region', { name: 'Reception details' })
+    await details.waitFor()
+    await details.getByRole('button', { name: 'Close reception details' }).focus()
+    const start = await scrollPosition()
+    assert.equal(await table.getAttribute('aria-rowcount'), '36')
+    await page.keyboard.press('ArrowDown')
+    assert.deepEqual(await scrollPosition(), start, 'Do not scroll while the next row is already visible')
+
+    for (let index = 0; index < 17; index += 1) await page.keyboard.press('ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-65')
+    await assertMoreReceptions(page, table)
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-65', 'Loading does not change the selection')
+
+    for (let index = 0; index < 14; index += 1) await page.keyboard.press('ArrowDown')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-51')
+    assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:54:06.428Z')
+    assert.ok(await details.evaluate((node) => node.contains(document.activeElement)))
+    const bottom = await scrollPosition()
+    assert.ok(bottom.top > start.top, 'Selecting an offscreen reception should scroll the table')
+    assert.equal(bottom.left, start.left)
+    assert.equal(bottom.pageTop, start.pageTop)
+    assert.ok(await selectedRowIsVisible())
+
+    for (let index = 0; index < 32; index += 1) await page.keyboard.press('ArrowUp')
+    assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-83')
+    assert.ok((await scrollPosition()).top < bottom.top)
+    assert.ok(await selectedRowIsVisible())
+
+    await page.keyboard.press('Escape')
+    await details.waitFor({ state: 'hidden' })
+    assert.ok(await newest.evaluate((node) => node === document.activeElement))
   })
 })
 
@@ -716,19 +909,25 @@ test('the packet table can also load older receptions through the UI SDK agent',
   }, loadWithAgent)
 })
 
-test('the UI SDK agent can open a reception from the Code button', async () => {
+test('the UI SDK agent can focus and close the reception inspector after row activation', async () => {
   await withWorkbench({}, async (page) => {
-    const opener = page.getByRole('button', { name: /^View reception A46F29 · KUN/i })
-    await opener.scrollIntoViewIfNeeded()
-    const label = await opener.getAttribute('aria-label')
-    const result = await page.evaluate(async (ref) => {
+    const row = page.locator('tr[data-reception-id="reception-95-83"]')
+    await row.getByRole('cell', { name: 'A46F29', exact: true }).click()
+    const result = await page.evaluate(async () => {
       const { agent } = await import('/tests/kitchen-sink-agent.mjs')
-      return agent.act({ steps: [{ ref, action: 'press' }] })
-    }, label)
+      return agent.act({ steps: [{ ref: 'Go to reception details', action: 'press' }] })
+    })
     assert.equal(result.ok, true, result.error?.message)
-    const details = page.getByRole('dialog', { name: /reception/i })
+    const details = page.getByRole('region', { name: 'Reception details' })
     await details.waitFor()
+    assert.ok(await details.evaluate(node => node === document.activeElement))
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
+    const closed = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [{ ref: 'Close reception details', action: 'press' }] })
+    })
+    assert.equal(closed.ok, true, closed.error?.message)
+    await details.waitFor({ state: 'hidden' })
   }, loadWithAgent)
 })
 
