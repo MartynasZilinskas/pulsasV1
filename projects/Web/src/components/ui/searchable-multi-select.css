@@ -1,0 +1,84 @@
+@import './theme.css';
+
+.ks-searchable-multi-select {
+  display: grid;
+  gap: 0.375rem;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--ks-ink);
+  font: 0.8125rem/1.4 var(--ks-sans);
+}
+.ks-searchable-multi-select-legend { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ks-searchable-multi-select-input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 2.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--ks-control-edge);
+  border-radius: 0.375rem;
+  background: var(--ks-paper);
+  color: inherit;
+  font: inherit;
+}
+.ks-searchable-multi-select-scroll {
+  position: relative;
+  max-block-size: 12rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ks-rule);
+  border-radius: 0.375rem;
+  background: var(--ks-paper);
+}
+.ks-searchable-multi-select-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.25rem; padding-inline: 0.5rem; }
+.ks-searchable-multi-select-row + .ks-searchable-multi-select-row { border-block-start: 1px solid var(--ks-rule); }
+.ks-searchable-multi-select-row:focus-within { background: var(--ks-ground); }
+.ks-searchable-multi-select-choice { display: flex; align-items: center; align-self: stretch; gap: 0.5rem; min-block-size: 2.375rem; padding-block: 0.25rem; cursor: pointer; }
+.ks-searchable-multi-select-option { min-inline-size: 0; overflow-wrap: anywhere; }
+.ks-searchable-multi-select-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--ks-control-edge);
+  border-radius: 0.25rem;
+  background: var(--ks-paper);
+  color: var(--ks-paper);
+  cursor: pointer;
+}
+.ks-searchable-multi-select-check[data-checked] { border-color: var(--ks-accent); background: var(--ks-accent); }
+.ks-searchable-multi-select-check svg { display: block; }
+.ks-searchable-multi-select-only {
+  min-block-size: 1.75rem;
+  padding: 0.25rem 0.375rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--ks-muted);
+  font: 625 0.75rem/1.3 var(--ks-sans);
+  cursor: pointer;
+}
+.ks-searchable-multi-select :is(input, button):focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 2px; }
+.ks-searchable-multi-select-only:active { background: var(--ks-accent-wash); color: var(--ks-ink); }
+.ks-searchable-multi-select-empty { margin: 0; padding: 0.625rem; color: var(--ks-muted); }
+
+@media (hover: hover) and (pointer: fine) {
+  .ks-searchable-multi-select-row:hover { background: var(--ks-ground); }
+  .ks-searchable-multi-select-row:not(:hover, :focus-within) .ks-searchable-multi-select-only { opacity: 0; }
+  .ks-searchable-multi-select-only:hover { background: var(--ks-accent-wash); color: var(--ks-ink); }
+}
+
+@media (any-pointer: coarse) {
+  .ks-searchable-multi-select-input { min-block-size: 2.75rem; font-size: 1rem; }
+  .ks-searchable-multi-select-only, .ks-searchable-multi-select-choice { min-block-size: 2.75rem; }
+  .ks-searchable-multi-select-only { min-inline-size: 2.75rem; }
+  .ks-searchable-multi-select-row:not(:hover, :focus-within) .ks-searchable-multi-select-only { opacity: 1; }
+}
+
+@media (forced-colors: active) {
+  .ks-searchable-multi-select-check[data-checked] { border-color: Highlight; color: ButtonText; }
+}

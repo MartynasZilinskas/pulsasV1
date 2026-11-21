@@ -14,6 +14,11 @@ const packetExamples = [
 
 const routes: readonly RouteKind[] = ['direct', 'flood', 'transportDirect', 'transportFlood']
 const regions = ['VNO', 'KUN', 'KLP'] as const
+const observersByRegion = {
+  VNO: ['Vilnius 1', 'Vilnius 2'],
+  KUN: ['Kaunas 1', 'Kaunas 2'],
+  KLP: ['Klaipėda 1', 'Klaipėda 2'],
+} as const
 const packetMix = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 4, 5] as const
 const interval = 15 * 60 * 1000
 const maxBuckets = 96
@@ -25,12 +30,16 @@ const activity = [7, 3, 7].flatMap(scale => activityPattern.map(count => count *
 export const trafficReferenceTime = new Date(start + activity.length * interval).toISOString()
 export const trafficSeries: readonly HistogramSeries[] = packetExamples.map(({ key, label, color }) => ({ key, label, color }))
 
-export const trafficRows: readonly PacketTableRow[] = activity.flatMap((count, bucketIndex) => {
+export type TrafficReception = PacketTableRow & { observer: string }
+
+export const trafficRows: readonly TrafficReception[] = activity.flatMap((count, bucketIndex) => {
   const bucketStart = start + bucketIndex * interval
-  return Array.from({ length: count }, (_, index): PacketTableRow => {
+  return Array.from({ length: count }, (_, index): TrafficReception => {
     const packetIndex = Math.floor(index / 2)
     const packet = packetExamples[packetMix[(bucketIndex + packetIndex * 7) % packetMix.length]]
     const route = routes[(bucketIndex + packetIndex) % routes.length]
+    const region = regions[(bucketIndex + index) % regions.length]
+    const observers = observersByRegion[region]
     return {
       id: `reception-${bucketIndex}-${index}`,
       code: (0xa41000 + bucketIndex * 256 + packetIndex).toString(16).toUpperCase(),
@@ -38,7 +47,8 @@ export const trafficRows: readonly PacketTableRow[] = activity.flatMap((count, b
       route: packet.key === 'unavailable' ? 'unavailable' : route,
       scope: packet.key !== 'unavailable' && route.startsWith('transport') && packetIndex % 3 === 0 ? '#baltics' : undefined,
       summary: packet.summary,
-      region: regions[(bucketIndex + index) % regions.length],
+      region,
+      observer: observers[(Math.floor(index / regions.length) + bucketIndex) % observers.length],
       arrivedAt: new Date(bucketStart + Math.floor(index * interval / count)).toISOString(),
     }
   })

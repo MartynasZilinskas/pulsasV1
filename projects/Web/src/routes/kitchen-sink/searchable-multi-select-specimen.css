@@ -1,0 +1,7 @@
+.ks-searchable-multi-select-example { inline-size: min(100%, 22rem); }
+.ks-searchable-multi-select-example .ks-searchable-multi-select-example-status {
+  margin-block-start: 0.5rem;
+  color: var(--ks-muted);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}

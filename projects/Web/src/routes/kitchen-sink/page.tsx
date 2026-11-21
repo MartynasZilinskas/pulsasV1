@@ -17,6 +17,7 @@ import { RouteBadge, type RouteKind } from '../../components/packets/route-badge
 import { PacketPathSpecimens } from './packet-path-specimens'
 import { PacketTrafficSpecimens } from './packet-traffic-specimens'
 import { PacketTypeSpecimens } from './packet-type-specimens'
+import { SearchableMultiSelectSpecimen } from './searchable-multi-select-specimen'
 import { ChannelKindSpecimens, MeshBrandSpecimens } from './static-specimens'
 import './kitchen-sink.css'
 import './map-specimens.css'
@@ -271,6 +272,7 @@ export function KitchenSinkPage() {
         <NodeIdentityContext identity={identity} />
         <RoleSpecimens />
         <PacketSpecimens />
+        <SearchableMultiSelectSpecimen />
         <PacketTrafficSpecimens />
         <PacketPathSpecimens />
         <MapExamplesSection />

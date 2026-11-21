@@ -32,8 +32,13 @@ const packetTypes = {
 
 export type PacketTypeCode = keyof typeof packetTypes
 
-export function PacketTypeBadge({ code, icons = true }: { code?: PacketTypeCode; icons?: boolean }) {
+export function PacketTypeBadge({ code, icons = true, passive = false }: { code?: PacketTypeCode; icons?: boolean; passive?: boolean }) {
   const packet: PacketType | undefined = code ? packetTypes[code] : undefined
+  const glyph = icons && <LucideGlyph name={packet?.glyph ?? 'circle-question-mark'} />
+  if (passive) return <span className="ks-badge ks-type-badge" data-packet-type={code ?? 'unavailable'} data-tone={packet?.tone ?? 'neutral'}>
+    {glyph}
+    <span>{code === '0x05' ? 'Group text' : packet?.label ?? 'Unavailable'}</span>
+  </span>
   return (
     <ExplainedBadge
       className="ks-type-badge"
@@ -42,7 +47,7 @@ export function PacketTypeBadge({ code, icons = true }: { code?: PacketTypeCode;
       aria-label={packet ? undefined : '??? (unavailable)'}
       explanation={packet ? `${packet.token} · ${packet.name} (${code})${packet.note ? `. ${packet.note}` : ''}` : 'Type unavailable'}
     >
-      {icons && <LucideGlyph name={packet?.glyph ?? 'circle-question-mark'} />}
+      {glyph}
       <span>{packet?.label ?? '???'}</span>
     </ExplainedBadge>
   )

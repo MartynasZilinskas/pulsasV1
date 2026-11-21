@@ -265,7 +265,7 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
           })}
           {spacer(rows.length - cursor)}
           {!rows.length && !hasMore && !isLoading && !error && <tr className="packet-reception-table-message">
-            <td colSpan={columns.length}>No receptions in this time range.</td>
+            <td colSpan={columns.length}>No receptions match the current filters.</td>
           </tr>}
         </tbody>
       </table>

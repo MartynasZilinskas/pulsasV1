@@ -54,6 +54,22 @@ async function assertMoreReceptions(page, table) {
   await page.waitForFunction(node => node.getAttribute('aria-rowcount') === '68', await table.elementHandle(), { timeout: 5000 })
 }
 
+function arrivalFields(traffic) {
+  return { from: traffic.getByLabel('From', { exact: true }), to: traffic.getByLabel('To', { exact: true }) }
+}
+
+async function fillArrivalRange(traffic, start, end) {
+  const { from, to } = arrivalFields(traffic)
+  await from.fill(start)
+  await to.fill(end)
+}
+
+const arrivalDayFormat = new Intl.DateTimeFormat('lt-LT', { dateStyle: 'full', timeZone: 'UTC' })
+
+function arrivalDay(editor, date) {
+  return editor.getByRole('gridcell', { name: arrivalDayFormat.format(Date.parse(date)), exact: true })
+}
+
 test('keyboard selects a role, dismisses the picker, and changes both modifiers', async () => {
   await withWorkbench({}, async (page) => {
     const role = page.getByRole('combobox', { name: 'Advertised role' })
@@ -375,9 +391,9 @@ test('packet traffic loads older fixture receptions inside its own scrolling tab
     const [headBounds, scrollBounds] = await Promise.all([heading.boundingBox(), scroller.boundingBox()])
     assert.ok(headBounds && scrollBounds && Math.abs(headBounds.y - scrollBounds.y) <= 2)
 
-    await traffic.getByRole('button', { name: 'Choose time range' }).press('Enter')
-    await traffic.getByRole('button', { name: 'Stage range' }).press('Enter')
-    await traffic.getByRole('button', { name: 'Zoom', exact: true }).press('Enter')
+    await traffic.getByRole('button', { name: 'Edit arrival time' }).press('Enter')
+    await fillArrivalRange(traffic, '2026-11-19 16:00', '2026-11-19 16:15')
+    await traffic.getByRole('button', { name: 'Apply range' }).press('Enter')
     assert.equal(await scroller.evaluate(node => node.scrollTop), 0)
     await traffic.getByRole('button', { name: 'Clear time range' }).press('Enter')
     assert.equal(await table.getAttribute('aria-rowcount'), '36')
@@ -509,7 +525,7 @@ test('clicking a passive cell opens its reception without stealing summary selec
 })
 
 test('the desktop inspector switches rows in place and stays open when the filter excludes a reception', async () => {
-  await withWorkbench({}, async (page) => {
+  await withWorkbench({ viewport: { width: 1440, height: 800 } }, async (page) => {
     const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
     const scroller = traffic.getByRole('region', { name: 'Reception list scroll area' })
     const inspector = traffic.getByRole('region', { name: 'Reception details' })
@@ -534,6 +550,15 @@ test('the desktop inspector switches rows in place and stays open when the filte
     await staticCode.click()
     await inspector.waitFor({ timeout: 5000 })
     const original = await inspector.elementHandle()
+    const [filtersBar, detailsBar] = await Promise.all([
+      traffic.getByRole('heading', { name: 'Filters', exact: true }).boundingBox(), inspector.locator('header').boundingBox(),
+    ])
+    assert.ok(filtersBar && detailsBar && Math.abs(filtersBar.y - detailsBar.y) < 1 && Math.abs(filtersBar.height - detailsBar.height) < 1)
+    const close = inspector.getByRole('button', { name: 'Close reception details' })
+    assert.ok(await close.evaluate(node => {
+      const style = getComputedStyle(node)
+      return style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderTopWidth === '0px'
+    }))
     const [listBounds, panelBounds] = await Promise.all([scroller.boundingBox(), inspector.boundingBox()])
     assert.ok(listBounds && panelBounds && listBounds.x + listBounds.width <= panelBounds.x + 1,
       'The inspector sits beside the table rather than covering it')
@@ -571,35 +596,82 @@ test('the desktop inspector switches rows in place and stays open when the filte
     assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
     assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
 
-    const choose = traffic.getByRole('button', { name: 'Choose time range' })
-    await choose.click()
-    await traffic.getByRole('button', { name: 'Stage range' }).click()
-    await traffic.getByRole('button', { name: 'Zoom', exact: true }).click()
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time', exact: true })
+    await edit.click()
+    await fillArrivalRange(traffic, '2026-11-19 16:00', '2026-11-19 16:15')
+    const apply = traffic.getByRole('button', { name: 'Apply range' })
+    await apply.click()
     assert.ok(await inspector.evaluate((node, initial) => node === initial, original))
     assert.match(await inspector.innerText(), /Outside the current filter/i)
     assert.equal(await inspector.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
     assert.equal(await selected.count(), 0)
-    await choose.focus()
+    await edit.focus()
     await page.keyboard.press('Escape')
     assert.ok(await inspector.isVisible(), 'Escape on a filter control does not close the inspector')
 
     await traffic.getByRole('button', { name: 'Clear time range' }).click()
     assert.doesNotMatch(await inspector.innerText(), /Outside the current filter/i)
+    assert.equal(await inspector.locator('header').innerText(), 'Reception details')
     assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
-    await traffic.getByRole('button', { name: 'Go to reception details' }).press('Enter')
-    assert.ok(await inspector.evaluate((node) => node === document.activeElement))
+    assert.equal(await traffic.getByRole('button', { name: /^Go to (reception )?details$/ }).count(), 0)
     await inspector.getByRole('button', { name: 'Close reception details' }).click()
     await inspector.waitFor({ state: 'hidden' })
     assert.ok(await second.evaluate((node) => node === document.activeElement))
   })
 })
 
+test('reception details separate Transport and Scope on desktop and in the narrow drawer', async () => {
+  for (const width of [1440, 320]) {
+    const mobile = width === 320
+    await withWorkbench({ viewport: { width, height: 800 }, isMobile: mobile, hasTouch: mobile }, async (page) => {
+      const row = page.locator('tr[data-reception-id="reception-95-79"]')
+      const badgeScope = row.getByRole('button', { name: 'T·Direct #baltics', exact: true }).getByText('#baltics', { exact: true })
+      assert.ok(await badgeScope.isVisible())
+      const badgeScopeColor = await badgeScope.evaluate(node => getComputedStyle(node).color)
+      const code = row.getByRole('cell').first()
+      if (mobile) await code.tap()
+      else await code.click()
+
+      const details = page.getByRole(mobile ? 'dialog' : 'region', { name: 'Reception details', exact: true })
+      await details.waitFor()
+      const fact = (name) => details.locator('dl > div').filter({ has: page.getByText(name, { exact: true }) })
+      const transport = fact('Transport')
+      const scope = fact('Scope')
+      const arrival = fact('Arrival (Vilnius)')
+      assert.equal(await transport.locator('dd').innerText(), 'T·Direct')
+      const scopeValue = scope.locator('dd code')
+      assert.equal(await scopeValue.innerText(), '#baltics')
+      assert.equal(await scopeValue.evaluate(node => getComputedStyle(node).color), badgeScopeColor)
+      assert.equal(await scopeValue.evaluate(node => getComputedStyle(node).fontWeight), '700')
+      const [routeBox, scopeBox, arrivalBox] = await Promise.all([
+        transport.boundingBox(), scope.boundingBox(), arrival.boundingBox(),
+      ])
+      assert.ok(routeBox && scopeBox && arrivalBox && scopeBox.width > routeBox.width && scopeBox.width === arrivalBox.width)
+
+      if (mobile) await details.getByRole('button', { name: 'Previous', exact: true }).tap()
+      else await page.keyboard.press('ArrowUp')
+      const noScope = scope.getByText('No scope', { exact: true })
+      assert.ok(await noScope.isVisible())
+      assert.notEqual(await noScope.evaluate(node => getComputedStyle(node).color), badgeScopeColor)
+      assert.equal(await arrival.locator('time').getAttribute('datetime'), '2026-11-20T13:59:17.142Z')
+    })
+  }
+})
+
 test('a passive cell opens the narrow drawer and touch controls switch receptions', async () => {
   await withWorkbench({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, async (page) => {
     const row = page.locator('tr[data-reception-id="reception-95-82"]')
+    const reopen = page.getByRole('button', { name: 'Go to details', exact: true })
+    assert.equal(await reopen.count(), 0)
     await row.getByRole('cell', { name: 'VNO', exact: true }).tap()
     const details = page.getByRole('dialog', { name: /reception/i })
     await details.waitFor()
+    const header = details.locator('header')
+    assert.equal(await header.innerText(), 'Reception details')
+    const [headerBox, closeBox] = await Promise.all([
+      header.boundingBox(), details.getByRole('button', { name: 'Close reception details' }).boundingBox(),
+    ])
+    assert.ok(headerBox && closeBox && closeBox.width >= 44 && closeBox.height >= 44 && headerBox.height <= closeBox.height + 16)
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
     const bounds = await details.boundingBox()
     assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 321, 'Drawer fits the 320px viewport')
@@ -613,6 +685,13 @@ test('a passive cell opens the narrow drawer and touch controls switch reception
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:38.571Z')
     await next.tap()
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:27.857Z')
+    await details.getByRole('button', { name: 'Close reception details' }).tap()
+    await details.waitFor({ state: 'hidden' })
+    await reopen.tap()
+    assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:27.857Z')
+    await details.getByRole('button', { name: 'Close reception details' }).press('Enter')
+    await details.waitFor({ state: 'hidden' })
+    assert.ok(await reopen.evaluate(node => node === document.activeElement))
   })
 })
 
@@ -772,14 +851,19 @@ test('inspector navigation preloads older receptions before reaching the last lo
   })
 })
 
-test('Zoom narrows and rebins the histogram and table by the same exact instants', async () => {
-  await withWorkbench({ timezoneId: 'America/New_York' }, async (page) => {
+test('histogram Zoom applies the same arrival filter as the sidebar', async () => {
+  await withWorkbench({ timezoneId: 'America/New_York', viewport: { width: 1440, height: 800 } }, async (page) => {
     const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
     const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
     const newest = () => table.locator('time').first().getAttribute('datetime')
     const initialNewest = await newest()
     const from = '2026-11-19T14:15:00.000Z'
-    const to = '2026-11-19T14:45:00.000Z'
+    const to = '2026-11-19T14:44:30.000Z'
+    const fields = arrivalFields(traffic)
+    const apply = traffic.getByRole('button', { name: 'Apply range' })
+    const active = traffic.getByRole('status', { name: 'Active time range' })
+    const confirmation = traffic.getByRole('dialog', { name: 'Selected time range', exact: true })
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time', exact: true })
     const histogram = traffic.getByRole('figure', { name: /receptions over time.*Vilnius/i })
     const bins = traffic.locator('[data-histogram-bucket]')
     assert.equal(await bins.count(), 96)
@@ -795,79 +879,109 @@ test('Zoom narrows and rebins the histogram and table by the same exact instants
     await page.mouse.down()
     await page.mouse.move(earlier.x + earlier.width / 2, earlier.y + earlier.height / 2, { steps: 4 })
     await page.mouse.up()
-    const staged = traffic.getByRole('dialog', { name: 'Staged time range (Vilnius)', exact: true })
-    await staged.waitFor()
-    assert.deepEqual(await staged.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), [from, to])
-    assert.match(await staged.locator('time').first().innerText(), /16:15/)
-    assert.match(await staged.locator('time').last().innerText(), /16:45/)
-    assert.match(await staged.innerText(), /182 receptions/i)
+    await confirmation.waitFor()
+    assert.match(await confirmation.innerText(), /2026-11-19.*16:15.*16:45/s)
+    assert.equal(await confirmation.getByRole('combobox').count(), 0, 'The chart confirms the range without another picker')
+    assert.equal(await fields.from.isVisible(), false)
     assert.equal(await newest(), initialNewest)
-    assert.equal(await bins.count(), 96)
-    await staged.getByRole('button', { name: 'Zoom', exact: true }).click()
-    await staged.waitFor({ state: 'hidden' })
+    assert.ok(await histogram.locator('.time-histogram-brush').isVisible())
+    await confirmation.getByRole('button', { name: 'Zoom', exact: true }).click()
+    await confirmation.waitFor({ state: 'hidden' })
     assert.equal(await newest(), '2026-11-19T14:44:47.142Z')
-    assert.match(await traffic.getByRole('status', { name: 'Active time range' }).innerText(), /16:15.*16:45.*Vilnius/is)
-    assert.ok(await table.locator('time').evaluateAll((nodes, [lower, upper]) => nodes.every(({ dateTime }) => dateTime >= lower && dateTime < upper), [from, to]))
-    assert.equal(await bins.count(), 60)
-    assert.equal(await table.locator('[data-feed-status]').count(), 0)
-    assert.equal(await bins.first().getAttribute('data-histogram-bucket'), from)
-    assert.equal(await bins.last().getAttribute('data-histogram-bucket'), '2026-11-19T14:44:30.000Z')
-    assert.equal(await histogram.locator('.time-histogram-brush').count(), 0)
-    const axis = histogram.locator('.time-histogram-axis')
-    assert.deepEqual(await axis.locator('span').allTextContents(), ['16:15:00', '16:22:30', '16:30:00', '16:37:30', '16:45:00'])
-    await bins.nth(1).click()
-    await staged.waitFor()
-    assert.match(await staged.innerText(), /4 receptions/i)
-    await staged.getByRole('button', { name: 'Zoom', exact: true }).click()
-    await staged.waitFor({ state: 'hidden' })
-    assert.equal(await bins.count(), 30)
-    assert.equal(await bins.first().getAttribute('data-histogram-bucket'), '2026-11-19T14:15:30.000Z')
-    assert.equal(await newest(), '2026-11-19T14:15:56.250Z')
-    assert.match(await traffic.getByRole('status', { name: 'Active time range' }).innerText(), /16:15:30.*16:16:00.*Vilnius/is)
-    await traffic.getByRole('button', { name: /clear.*range/i }).click()
-    assert.equal(await newest(), initialNewest)
-    assert.equal(await bins.count(), 96)
-    assert.equal(await table.locator('[data-feed-status]').count(), 3)
+    assert.match(await active.innerText(), /2026-11-19.*16:15.*16:45/s)
 
-    const emptyBucket = bins.nth(3)
-    await emptyBucket.click()
-    await staged.waitFor()
-    assert.match(await staged.innerText(), /0 receptions/i)
-    await staged.getByRole('button', { name: 'Zoom', exact: true }).click()
-    await staged.waitFor({ state: 'hidden' })
-    assert.equal(await table.locator('time').count(), 0)
+    await bins.nth(3).click()
+    await confirmation.waitFor()
+    await page.keyboard.press('Escape')
+    await confirmation.waitFor({ state: 'hidden' })
+    assert.equal(await newest(), '2026-11-19T14:44:47.142Z')
+
+    await page.mouse.move(later.x + later.width / 2, later.y + later.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(earlier.x - earlier.width / 2, earlier.y + earlier.height / 2, { steps: 4 })
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    assert.equal(await confirmation.isVisible(), false, 'Canceling an in-progress drag does not open the confirmation')
+    assert.equal(await newest(), '2026-11-19T14:44:47.142Z')
+
+    await edit.click()
+    assert.equal(await fields.from.inputValue(), '2026-11-19 16:15')
+    assert.equal(await fields.to.inputValue(), '2026-11-19 16:45')
+    await fields.to.fill('2026-11-19 16:40')
+    await page.keyboard.press('Escape')
+    assert.equal(await fields.to.isVisible(), false)
+    assert.ok(await edit.evaluate(node => node === document.activeElement))
+    await edit.click()
+    assert.equal(await fields.to.inputValue(), '2026-11-19 16:45', 'Cancel discards unsubmitted manual changes')
+    await fields.to.fill('2026-11-19 16:44:30')
+    assert.equal(await newest(), '2026-11-19T14:44:47.142Z')
+    const draftWidth = parseFloat(await histogram.locator('.time-histogram-brush').evaluate(node => node.style.width))
+    assert.ok(Math.abs(draftWidth - (29.5 / (24 * 60) * 100)) < 0.001, 'Typed seconds are not snapped to a bucket')
+    await apply.click()
+    const summary = await active.innerText()
+    assert.match(summary, /2026-11-19.*16:15.*16:44:30/s)
+    assert.equal((summary.match(/2026-11-19/g) ?? []).length, 1, 'Same-day ranges print the date once')
+    assert.notEqual(await newest(), initialNewest)
+    assert.ok(await table.locator('time').evaluateAll((nodes, [lower, upper]) => nodes.every(({ dateTime }) => dateTime >= lower && dateTime < upper), [from, to]))
+    assert.equal(await table.locator('[data-feed-status]').count(), 0)
+    assert.equal(await bins.count(), 96)
+    assert.equal(await bins.first().getAttribute('data-histogram-bucket'), '2026-11-19T14:00:00.000Z')
+    assert.ok(await histogram.locator('.time-histogram-brush[data-applied]').isVisible())
+
+    const appliedNewest = await newest()
+    await bins.nth(3).click()
+    await confirmation.waitFor()
+    assert.equal(await active.innerText(), summary, 'A new chart selection does not hide the active range')
+    assert.equal(await newest(), appliedNewest)
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await confirmation.waitFor({ state: 'hidden' })
+    assert.equal(await newest(), appliedNewest)
+    await bins.nth(3).click()
+    await confirmation.getByRole('button', { name: 'Zoom', exact: true }).click()
     assert.match(await table.innerText(), /no receptions/i)
-    assert.equal(await bins.first().getAttribute('data-histogram-bucket'), '2026-11-19T14:45:00.000Z')
-    assert.equal(await bins.locator('span').count(), 0)
+    assert.equal(await bins.count(), 96)
+    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    assert.equal(await newest(), initialNewest)
+    assert.equal(await table.locator('[data-feed-status]').count(), 3)
+    assert.equal(await histogram.locator('.time-histogram-brush').count(), 0)
+    await edit.click()
+    assert.equal(await fields.from.inputValue(), '')
+    assert.equal(await fields.to.inputValue(), '')
   })
 })
 
-test('keyboard can stage, cancel, and apply a histogram bucket without dragging', async () => {
-  await withWorkbench({ viewport: { width: 320, height: 700 } }, async (page) => {
+test('keyboard users can open the single editor, correct bounds, and apply a range', async () => {
+  await withWorkbench({ viewport: { width: 320, height: 700 }, timezoneId: 'America/New_York' }, async (page) => {
     const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
     const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
-    const choose = traffic.getByRole('button', { name: 'Choose time range', exact: true })
-    const picker = traffic.getByRole('dialog', { name: /Time range.*Vilnius/i })
-    const staged = traffic.getByRole('dialog', { name: 'Staged time range (Vilnius)', exact: true })
-    const stage = async () => {
-      await choose.press('Enter')
-      await picker.waitFor()
-      assert.ok(await picker.getByRole('combobox', { name: 'First bucket' }).isVisible())
-      assert.ok(await picker.getByRole('combobox', { name: 'Last bucket' }).isVisible())
-      await picker.getByRole('button', { name: 'Stage range', exact: true }).press('Enter')
-      await staged.waitFor()
-    }
-    const firstTime = () => table.locator('time').first().getAttribute('datetime')
-    const initialNewest = await firstTime()
-    await stage()
-    await page.keyboard.press('Escape')
-    await staged.waitFor({ state: 'hidden' })
-    assert.equal(await firstTime(), initialNewest)
-    assert.ok(await choose.evaluate(node => document.activeElement === node))
-    await stage()
-    await staged.getByRole('button', { name: 'Zoom', exact: true }).press('Enter')
-    await staged.waitFor({ state: 'hidden' })
-    assert.equal(await firstTime(), '2026-11-19T14:14:43.928Z')
+    const initialNewest = await table.locator('time').first().getAttribute('datetime')
+    const { from, to } = arrivalFields(traffic)
+    const apply = traffic.getByRole('button', { name: 'Apply range' })
+    await traffic.getByRole('button', { name: 'Edit arrival time' }).press('Enter')
+    assert.equal(await from.count(), 1)
+    assert.ok(await from.evaluate(node => node === document.activeElement))
+    assert.ok(await traffic.getByText(/Europe\/Vilnius/).first().isVisible())
+    await apply.press('Enter')
+    assert.equal(await from.getAttribute('aria-invalid'), 'true')
+    assert.ok(await from.evaluate(node => node === document.activeElement))
+    await fillArrivalRange(traffic, '2026-11-19 16:15', '2026-11-19 16:00')
+    await apply.press('Enter')
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), initialNewest)
+    assert.equal(await to.getAttribute('aria-invalid'), 'true')
+    assert.ok(await to.evaluate(node => node === document.activeElement))
+
+    await fillArrivalRange(traffic, '2026-03-29 03:30', '2026-03-29 04:30')
+    await apply.press('Enter')
+    assert.ok(await traffic.getByText(/this time is skipped/i).isVisible())
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), initialNewest)
+    await fillArrivalRange(traffic, '2026-10-25 03:30', '2026-10-25 04:30')
+    await apply.press('Enter')
+    assert.ok(await traffic.getByText(/this time occurs twice/i).isVisible())
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), initialNewest)
+
+    await fillArrivalRange(traffic, '2026-11-19 16:00', '2026-11-19 16:15')
+    await to.press('Enter')
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:14:43.928Z')
     const scroller = traffic.getByRole('region', { name: 'Reception list scroll area' })
     await scroller.evaluate(node => { node.scrollTop = node.scrollHeight })
     await scroller.getByText('End of available history.', { exact: true }).waitFor({ timeout: 5000 })
@@ -875,23 +989,471 @@ test('keyboard can stage, cancel, and apply a histogram bucket without dragging'
   })
 })
 
-test('touch can choose and apply histogram bounds without brushing', async () => {
+test('touch can apply calendar defaults and edit an overnight range without horizontal overflow', async () => {
   await withWorkbench({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, async (page) => {
     const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
-    await traffic.getByRole('button', { name: 'Choose time range', exact: true }).tap()
-    const picker = traffic.getByRole('dialog', { name: /Time range.*Vilnius/i })
-    const last = picker.getByRole('combobox', { name: 'Last bucket' })
-    await last.tap()
-    await page.getByRole('option', { name: /Nov 19.*16:15.*16:30/ }).tap()
-    await picker.getByRole('button', { name: 'Stage range', exact: true }).tap()
-    const staged = traffic.getByRole('dialog', { name: 'Staged time range (Vilnius)', exact: true })
-    await staged.waitFor()
-    assert.match(await staged.innerText(), /168 receptions/i)
-    await staged.getByRole('button', { name: 'Zoom', exact: true }).tap()
-    await staged.waitFor({ state: 'hidden' })
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time' })
+    await edit.tap()
+    const editor = traffic.getByRole('dialog', { name: 'Arrival time', exact: true })
+    const fromDay = arrivalDay(editor, '2026-11-19')
+    const toDay = arrivalDay(editor, '2026-11-20')
+    const apply = editor.getByRole('button', { name: 'Apply range' })
+    const sheet = await editor.elementHandle()
+    // Measure before tapping or scrolling any controls; wait for the sheet's opening motion.
+    await page.waitForFunction(node => {
+      const panel = node.getBoundingClientRect()
+      return ['[data-value="2026-11-19"]', '[data-value="2026-11-20"]', 'button[type="submit"]'].every(selector => {
+        const box = node.querySelector(selector)?.getBoundingClientRect()
+        return box && box.height > 0 && box.top >= Math.max(0, panel.top) && box.bottom <= Math.min(innerHeight, panel.bottom) + 1
+      })
+    }, sheet, { timeout: 3000 })
+    await fromDay.tap()
+    await toDay.tap()
+    assert.equal(await fromDay.getAttribute('aria-selected'), 'true')
+    assert.equal(await toDay.getAttribute('aria-selected'), 'true')
+    const fields = arrivalFields(traffic)
+    assert.equal(await fields.from.inputValue(), '2026-11-19 00:00')
+    assert.equal(await fields.to.inputValue(), '2026-11-20 23:59:59')
+    const active = traffic.getByRole('status', { name: 'Active time range', includeHidden: true })
+    assert.equal(await active.textContent(), 'All times')
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    await apply.tap()
+    await editor.waitFor({ state: 'hidden' })
+    assert.deepEqual(await active.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), [
+      '2026-11-18T22:00:00.000Z', '2026-11-20T21:59:59.000Z',
+    ])
+    await edit.tap()
+    await fillArrivalRange(traffic, '2026-11-19 23:45', '2026-11-20 00:15')
+    await apply.tap()
+    await editor.waitFor({ state: 'hidden' })
+    assert.match(await active.innerText(), /2026-11-19.*23:45.*2026-11-20.*00:15/s)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
     const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const rows = await table.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime))
+    assert.ok(rows.length > 0 && rows.every(time => time >= '2026-11-19T21:45:00.000Z' && time < '2026-11-19T22:15:00.000Z'))
+    await traffic.getByRole('button', { name: 'Hide filters' }).tap()
+    assert.equal(await traffic.getByRole('button', { name: 'Edit arrival time' }).isVisible(), false)
+    await traffic.getByRole('button', { name: 'Show filters' }).tap()
+    assert.match(await active.textContent(), /23:45.*00:15/s)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+  })
+})
+
+test('the UI SDK agent can apply an arrival range, toggle filters, and clear the range', async () => {
+  await withWorkbench({}, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const act = async (steps) => {
+      const result = await page.evaluate(async (steps) => {
+        const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+        return agent.act({ steps })
+      }, steps)
+      assert.equal(result.ok, true, result.error?.message)
+    }
+    await act([
+      { ref: 'Edit arrival time', action: 'press' },
+      { ref: 'Arrival dates', action: 'setValue', args: [['2026-11-19', '2026-11-19']] },
+    ])
+    const { from, to } = arrivalFields(traffic)
+    assert.equal(await from.inputValue(), '2026-11-19 00:00')
+    assert.equal(await to.inputValue(), '2026-11-19 23:59:59')
+    await act([
+      { ref: 'From', action: 'setValue', args: ['2026-11-19 16:14:43'] },
+      { ref: 'To', action: 'setValue', args: ['2026-11-19 16:15'] },
+    ])
+    assert.equal(await from.inputValue(), '2026-11-19 16:14:43')
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
+    await act([{ ref: 'Apply range', action: 'press' }])
+    assert.deepEqual(await table.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), ['2026-11-19T14:14:43.928Z'])
+    await act([{ ref: 'Hide filters', action: 'toggle' }])
+    assert.equal(await traffic.getByRole('button', { name: 'Edit arrival time' }).isVisible(), false)
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:14:43.928Z')
+    await act([{ ref: 'Show filters', action: 'toggle' }])
+    await act([{ ref: 'Clear time range', action: 'press' }])
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
+  }, loadWithAgent)
+})
+
+test('selecting the same day twice fills an immediately applicable range', async () => {
+  await withWorkbench({ timezoneId: 'America/New_York' }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const editor = traffic.getByRole('dialog', { name: 'Arrival time', exact: true })
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time' })
+    const { from, to } = arrivalFields(traffic)
+    const active = traffic.getByRole('status', { name: 'Active time range' })
+    const day = arrivalDay(editor, '2026-11-19')
+    await edit.press('Enter')
+    assert.equal(await from.inputValue(), '')
+    assert.equal(await to.inputValue(), '')
+    await day.press('Enter')
+    await day.press('Enter')
+    assert.equal(await from.inputValue(), '2026-11-19 00:00')
+    assert.equal(await to.inputValue(), '2026-11-19 23:59:59')
+    assert.equal(await active.textContent(), 'All times')
+    await editor.getByRole('button', { name: 'Apply range' }).press('Enter')
+    await editor.waitFor({ state: 'hidden' })
+    assert.deepEqual(await active.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), [
+      '2026-11-18T22:00:00.000Z', '2026-11-19T21:59:59.000Z',
+    ])
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const times = await table.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime))
+    assert.ok(times.length && times.every(time => time >= '2026-11-18T22:00:00.000Z' && time < '2026-11-19T21:59:59.000Z'))
+  })
+})
+
+test('selecting days with the calendar preserves exact times and waits for Apply', async () => {
+  await withWorkbench({ timezoneId: 'America/New_York' }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const newest = () => table.locator('time').first().getAttribute('datetime')
+    const initialNewest = await newest()
+    const active = traffic.getByRole('status', { name: 'Active time range' })
+    const editor = traffic.getByRole('dialog', { name: 'Arrival time', exact: true })
+    const day = (date) => arrivalDay(editor, date)
+    await traffic.getByRole('button', { name: 'Edit arrival time' }).click()
+    assert.equal(await editor.getByRole('grid').count(), 1)
+    await editor.getByRole('button', { name: 'Next month' }).click()
+    assert.ok(await day('2026-12-19').isVisible())
+    await editor.getByRole('button', { name: 'Previous month' }).click()
+    await fillArrivalRange(traffic, '2026-11-19 16:14:43', '2026-11-20 16:15')
+    assert.equal(await day('2026-11-20').getAttribute('aria-selected'), 'true', 'Manual dates are reflected in the calendar')
+
+    // Pick a same-day range using the calendar; the From and To times are distinct.
+    await day('2026-11-19').press('Enter')
+    assert.equal(await newest(), initialNewest)
+    await day('2026-11-19').press('Enter')
+    assert.equal(await active.innerText(), 'All times')
+    assert.equal(await newest(), initialNewest)
+
+    await editor.getByRole('button', { name: 'Apply range' }).click()
+    await editor.waitFor({ state: 'hidden' })
+    assert.deepEqual(await active.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), [
+      '2026-11-19T14:14:43.000Z', '2026-11-19T14:15:00.000Z',
+    ])
+    assert.deepEqual(await table.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), ['2026-11-19T14:14:43.928Z'])
+
+    await traffic.getByRole('button', { name: 'Edit arrival time' }).click()
+    await day('2026-11-20').click()
+    await day('2026-11-20').click()
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await editor.waitFor({ state: 'hidden' })
+    assert.equal(await newest(), '2026-11-19T14:14:43.928Z')
+    await traffic.getByRole('button', { name: 'Edit arrival time' }).click()
+    assert.equal(await day('2026-11-19').getAttribute('aria-selected'), 'true')
+    assert.equal(await day('2026-11-20').getAttribute('aria-selected'), 'false')
+  })
+})
+
+test('hiding filters reclaims the rail without clearing the range or inspector', async () => {
+  await withWorkbench({ viewport: { width: 1440, height: 800 } }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const list = traffic.getByRole('region', { name: 'Reception list scroll area' })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time', exact: true })
+    const hide = traffic.getByRole('button', { name: 'Hide filters', exact: true })
+    const show = traffic.getByRole('button', { name: 'Show filters', exact: true })
+    const loaded = traffic.getByText(/^\d+ loaded$/)
+    const active = traffic.getByRole('status', { name: 'Active time range' })
+    const inspector = traffic.getByRole('region', { name: 'Reception details' })
+    await table.locator('tr[data-reception-id] td').first().click()
+    await edit.click()
+    await fillArrivalRange(traffic, '2026-11-19 16:00', '2026-11-19 16:15')
+    await traffic.getByRole('button', { name: 'Apply range' }).click()
+    const withFilters = await list.boundingBox()
+    const hideBox = await hide.boundingBox()
+    const loadedWithFilters = await loaded.boundingBox()
+    assert.ok(hideBox && loadedWithFilters && hideBox.x + hideBox.width <= loadedWithFilters.x)
+    assert.ok(await hide.locator('svg[aria-hidden="true"]').isVisible())
+    assert.equal(await hide.getAttribute('aria-expanded'), 'true')
+    const controlled = await hide.getAttribute('aria-controls')
+    assert.ok(controlled)
+    await hide.press('Enter')
+    assert.equal(await show.getAttribute('aria-expanded'), 'false')
+    assert.equal(await show.getAttribute('aria-controls'), controlled)
+    assert.ok(await show.evaluate(node => node === document.activeElement))
+    assert.equal(await edit.isVisible(), false)
+    assert.ok(await traffic.getByText('1 active filter', { exact: true }).isVisible())
+    const withoutFilters = await list.boundingBox()
+    assert.ok(withFilters && withoutFilters && withoutFilters.width > withFilters.width)
+    const showBox = await show.boundingBox()
+    const loadedWithoutFilters = await loaded.boundingBox()
+    assert.ok(showBox && loadedWithoutFilters && showBox.x + showBox.width <= loadedWithoutFilters.x)
+    assert.ok(await inspector.isVisible())
+    assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:14:43.928Z')
+
+    await page.getByRole('heading', { name: 'Packet traffic', exact: true }).click()
+    await traffic.locator('[data-histogram-bucket]').nth(1).click()
+    await traffic.getByRole('dialog', { name: 'Selected time range' }).getByRole('button', { name: 'Zoom' }).click()
     assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:29:51.964Z')
-    assert.equal(await table.getAttribute('aria-rowcount'), '33')
+    assert.ok(await show.evaluate(node => node === document.activeElement))
+    assert.ok(await inspector.isVisible())
+    await show.press('Enter')
+    assert.ok(await edit.isVisible())
+    assert.ok(await hide.evaluate(node => node === document.activeElement))
+    assert.deepEqual(await active.locator('time').evaluateAll(nodes => nodes.map(node => node.dateTime)), [
+      '2026-11-19T14:15:00.000Z', '2026-11-19T14:30:00.000Z',
+    ])
+  })
+})
+
+test('the standalone searchable multi-select keeps hidden choices until Only replaces them', async () => {
+  await withWorkbench({}, async (page) => {
+    const specimen = page.getByRole('region', { name: 'Searchable multi-select', exact: true })
+    const search = specimen.getByLabel('Search example packet types', { exact: true })
+    await search.waitFor({ timeout: 3000 })
+    assert.equal(await search.getAttribute('placeholder'), 'Search…')
+    assert.equal(await specimen.getByText('Search example packet types', { exact: true }).isVisible(), false)
+    const choice = name => specimen.getByRole('checkbox', { name, exact: true })
+    const advert = choice('Advert')
+    const text = choice('Text')
+    const groupText = choice('Group text')
+    assert.ok(await advert.evaluate(node => {
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        if (/^(auto|scroll)$/.test(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight) return true
+      }
+      return false
+    }), 'The options have their own scroll container')
+    assert.ok(await specimen.locator('[data-packet-type="0x04"]').isVisible())
+    await advert.press('Space')
+    await search.fill(' TeXT ')
+    assert.equal(await advert.isVisible(), false)
+    assert.ok(await groupText.isVisible())
+    await text.press('Space')
+    await search.fill('')
+    assert.ok(await advert.isChecked())
+    assert.ok(await text.isChecked())
+
+    await search.fill('group text')
+    await search.press('Tab')
+    assert.ok(await groupText.evaluate(node => document.activeElement === node))
+    await page.keyboard.press('Tab')
+    const only = specimen.getByRole('button', { name: /^only group text$/i })
+    assert.ok(await only.evaluate(node => document.activeElement === node && getComputedStyle(node).opacity === '1'))
+    await page.keyboard.press('Enter')
+    assert.ok(await groupText.isChecked())
+    assert.equal(await search.inputValue(), 'group text')
+    await search.fill('no-matching-packet-type')
+    assert.equal(await specimen.getByRole('checkbox').count(), 0)
+    assert.match(await specimen.innerText(), /no .*match/i)
+    await search.fill('')
+    assert.ok(await groupText.isChecked())
+    assert.equal(await advert.isChecked(), false)
+    assert.equal(await text.isChecked(), false)
+  })
+})
+
+test('the standalone searchable multi-select supports the SDK and exposes Only on touch', async () => {
+  await withWorkbench({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, async (page) => {
+    const specimen = page.getByRole('region', { name: 'Searchable multi-select', exact: true })
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [
+        { ref: 'Search example packet types', action: 'setValue', args: ['Advert'] },
+        { ref: 'Only Advert', action: 'press' },
+      ] })
+    })
+    assert.equal(result.ok, true, result.error?.message)
+    assert.ok(await specimen.getByRole('checkbox', { name: 'Advert', exact: true }).isChecked())
+    const search = specimen.getByLabel('Search example packet types', { exact: true })
+    await search.fill('trace')
+    const only = specimen.getByRole('button', { name: /^only trace$/i })
+    await only.scrollIntoViewIfNeeded()
+    assert.ok(await only.evaluate(node => getComputedStyle(node).opacity === '1'))
+    await only.tap()
+    await search.fill('')
+    assert.ok(await specimen.getByRole('checkbox', { name: 'Trace', exact: true }).isChecked())
+    assert.equal(await specimen.getByRole('checkbox', { name: 'Advert', exact: true }).isChecked(), false)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+  }, loadWithAgent)
+})
+
+test('hash search finds older receptions, combines with filters, and stays above the histogram', async () => {
+  await withWorkbench({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const search = traffic.getByRole('searchbox', { name: 'Search by hash', exact: true })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const rows = table.locator('tr[data-reception-id]')
+    const buckets = traffic.locator('[data-histogram-bucket]')
+    const bucketStarts = () => buckets.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-histogram-bucket')))
+    const initialBuckets = await bucketStarts()
+    assert.equal(await search.getAttribute('placeholder'), 'Search by hash...')
+    assert.equal(await traffic.getByText('Hash', { exact: true }).isVisible(), false)
+    const inputBox = await search.boundingBox()
+    const chartBox = await traffic.locator('[data-histogram-plot]').boundingBox()
+    assert.ok(inputBox && chartBox && inputBox.y + inputBox.height <= chartBox.y)
+    assert.ok(Math.abs(inputBox.x - chartBox.x) < 1 && Math.abs(inputBox.width - chartBox.width) < 1)
+    assert.equal(await table.getByText('A41000', { exact: true }).count(), 0)
+    await search.fill(' a41000 ')
+    assert.deepEqual(await rows.locator('td:first-child').allTextContents(), ['A41000', 'A41000'])
+    await search.fill('41000')
+    assert.equal(await rows.count(), 2)
+    await traffic.getByRole('button', { name: 'Region', exact: true }).tap()
+    await traffic.getByRole('checkbox', { name: 'KUN', exact: true }).tap()
+    assert.deepEqual(await rows.locator('td:nth-child(5)').allTextContents(), ['KUN'])
+    await traffic.getByRole('button', { name: 'Hide filters', exact: true }).tap()
+    assert.equal(await search.inputValue(), '41000')
+    await search.fill('no-such-hash')
+    assert.ok(await table.getByText('No receptions match the current filters.').isVisible())
+    await search.fill('')
+    const regions = await rows.locator('td:nth-child(5)').allTextContents()
+    assert.ok(regions.length > 1)
+    assert.deepEqual([...new Set(regions)], ['KUN'])
+    assert.deepEqual(await bucketStarts(), initialBuckets)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+  })
+})
+
+test('the UI SDK agent can search by hash', async () => {
+  await withWorkbench({ viewport: { width: 1440, height: 800 } }, async (page) => {
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [{ ref: 'Search by hash', action: 'setValue', args: ['a41000'] }] })
+    })
+    assert.equal(result.ok, true, result.error?.message)
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const inputBox = await traffic.getByRole('searchbox', { name: 'Search by hash', exact: true }).boundingBox()
+    const chartBox = await traffic.locator('[data-histogram-plot]').boundingBox()
+    assert.ok(inputBox && chartBox && Math.abs(inputBox.x - chartBox.x) < 1 && Math.abs(inputBox.width - chartBox.width) < 1)
+    assert.deepEqual(await traffic.locator('tr[data-reception-id] td:first-child').allTextContents(), ['A41000', 'A41000'])
+  }, loadWithAgent)
+})
+
+test('packet filter sections combine, stay applied when hidden, and share the arrival range', async () => {
+  await withWorkbench({ viewport: { width: 1440, height: 800 } }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const rows = table.locator('tr[data-reception-id]')
+    const hist = traffic.locator('[data-histogram-bucket]')
+    const bucketStarts = () => hist.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-histogram-bucket')))
+    const initialBuckets = await bucketStarts()
+    const section = (name) => traffic.getByRole('button', { name: new RegExp(`^${name}\\b`) })
+    const choice = (name) => traffic.getByRole('checkbox', { name, exact: true })
+    const types = () => rows.locator('[data-packet-type]').evaluateAll(nodes => [...new Set(nodes.map(node => node.getAttribute('data-packet-type')))].sort())
+    await rows.first().press('Enter')
+    const inspector = traffic.getByRole('region', { name: 'Reception details' })
+    const selectedTime = await inspector.locator('time').getAttribute('datetime')
+    for (const name of ['Packet type', 'Scope', 'Observer', 'Region']) {
+      assert.equal(await section(name).getAttribute('aria-expanded'), 'false')
+    }
+
+    await section('Packet type').press('Enter')
+    const search = traffic.getByLabel('Search packet type', { exact: true })
+    const initialReception = await rows.first().getAttribute('data-reception-id')
+    await search.fill('advert')
+    const advertBadge = traffic.getByRole('group', { name: 'Packet type options' }).locator('[data-packet-type="0x04"]')
+    assert.ok(await advertBadge.isVisible())
+    assert.equal(await choice('Text').isVisible(), false)
+    assert.equal(await rows.first().getAttribute('data-reception-id'), initialReception)
+    await traffic.getByRole('button', { name: /^only advert$/i }).press('Enter')
+    assert.deepEqual(await types(), ['0x04'])
+    await search.fill('')
+    await choice('Text').press('Space')
+    assert.deepEqual(await types(), ['0x02', '0x04'])
+    await section('Packet type').press('Enter')
+    assert.equal(await choice('Advert').isVisible(), false)
+    assert.deepEqual(await types(), ['0x02', '0x04'])
+
+    await section('Scope').click()
+    await choice('#baltics').click()
+    await section('Observer').click()
+    await choice('Kaunas 1').click()
+    assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
+    await section('Region').click()
+    await choice('VNO').click()
+    await choice('KUN').click()
+    assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
+    await traffic.getByRole('button', { name: /^only vno$/i }).press('Enter')
+    assert.ok(await table.getByText('No receptions match the current filters.').isVisible())
+    assert.ok(await inspector.getByText('Outside the current filter').isVisible())
+    assert.equal(await inspector.locator('time').getAttribute('datetime'), selectedTime)
+    await traffic.getByRole('button', { name: /^only kun$/i }).press('Enter')
+    assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
+
+    await traffic.getByRole('button', { name: 'Hide filters', exact: true }).click()
+    assert.equal(await section('Region').isVisible(), false)
+    assert.ok(await traffic.getByText('4 active filters', { exact: true }).isVisible())
+    assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
+    assert.deepEqual(await bucketStarts(), initialBuckets)
+    await hist.nth(4).click()
+    await traffic.getByRole('dialog', { name: 'Selected time range' }).getByRole('button', { name: 'Zoom' }).click()
+    assert.ok(await traffic.getByText('5 active filters', { exact: true }).isVisible())
+    assert.deepEqual(await rows.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-reception-id'))), [
+      'reception-4-54', 'reception-4-30', 'reception-4-6',
+    ])
+    assert.deepEqual(await bucketStarts(), initialBuckets)
+
+    await traffic.getByRole('button', { name: 'Show filters', exact: true }).press('Enter')
+    if (await section('Region').getAttribute('aria-expanded') === 'false') await section('Region').press('Enter')
+    assert.equal(await choice('KUN').getAttribute('aria-checked'), 'true')
+    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
+  })
+})
+
+test('the packet filter sidebar scrolls independently of the reception list', async () => {
+  for (const width of [320, 1440]) {
+    const touch = width === 320
+    await withWorkbench({ viewport: { width, height: 700 }, isMobile: touch, hasTouch: touch }, async (page) => {
+      const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+      const sidebar = traffic.getByRole('region', { name: 'Packet traffic filters', exact: true })
+      const list = traffic.getByRole('region', { name: 'Reception list scroll area', exact: true })
+      for (const name of ['Packet type', 'Scope', 'Observer', 'Region']) {
+        const section = sidebar.getByRole('button', { name, exact: true })
+        if (touch) await section.tap()
+        else await section.press('Enter')
+      }
+      assert.ok(await sidebar.evaluate(node => node.scrollHeight > node.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(node).overflowY)))
+      if (!touch) {
+        await sidebar.focus()
+        await sidebar.press('End')
+        await page.waitForFunction(node => node.scrollTop === node.scrollHeight - node.clientHeight, await sidebar.elementHandle(), { timeout: 3000 })
+        assert.equal(await list.evaluate(node => node.scrollTop), 0)
+      }
+      const region = sidebar.getByRole('checkbox', { name: 'VNO', exact: true })
+      if (touch) await region.tap()
+      else await region.press('Space')
+      assert.ok(await region.isChecked())
+      assert.ok(await sidebar.evaluate(node => node.scrollTop > 0))
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    })
+  }
+})
+
+test('the UI SDK agent can expand a packet filter and update its selection', async () => {
+  await withWorkbench({}, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [
+        { ref: 'Region', action: 'setOpen', args: [true] },
+        { ref: 'KUN', action: 'setChecked', args: [true] },
+      ] })
+    })
+    assert.equal(result.ok, true, result.error?.message)
+    const table = traffic.getByRole('table', { name: 'Packet receptions', exact: true })
+    const regions = await table.locator('tr[data-reception-id] td:nth-child(5)').allTextContents()
+    assert.ok(regions.length > 0)
+    assert.deepEqual([...new Set(regions)], ['KUN'])
+  }, loadWithAgent)
+})
+
+test('medium-width packet traffic keeps the filters and inline inspector usable together', async () => {
+  await withWorkbench({ viewport: { width: 1024, height: 800 } }, async (page) => {
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    const from = arrivalFields(traffic).from
+    const edit = traffic.getByRole('button', { name: 'Edit arrival time' })
+    assert.equal(await from.isVisible(), false)
+    await traffic.locator('tr[data-reception-id] td').first().click()
+    const inspector = traffic.getByRole('region', { name: 'Reception details' })
+    const list = traffic.getByRole('region', { name: 'Reception list scroll area' })
+    assert.equal(await traffic.getByRole('button', { name: /^Go to (reception )?details$/ }).count(), 0)
+    await edit.click()
+    assert.ok(await from.isVisible())
+    const [trigger, panel, scroller] = await Promise.all([edit.boundingBox(), inspector.boundingBox(), list.boundingBox()])
+    assert.ok(trigger && panel && scroller && trigger.y + trigger.height < scroller.y && scroller.x + scroller.width <= panel.x + 1)
+    await page.keyboard.press('Escape')
+    assert.ok(await inspector.isVisible(), 'Escape dismisses the editor, not the inspector')
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
   })
 })
 
@@ -909,25 +1471,24 @@ test('the packet table can also load older receptions through the UI SDK agent',
   }, loadWithAgent)
 })
 
-test('the UI SDK agent can focus and close the reception inspector after row activation', async () => {
-  await withWorkbench({}, async (page) => {
+test('the UI SDK agent can reopen reception details on mobile', async () => {
+  await withWorkbench({ viewport: { width: 390, height: 750 }, isMobile: true, hasTouch: true }, async (page) => {
     const row = page.locator('tr[data-reception-id="reception-95-83"]')
     await row.getByRole('cell', { name: 'A46F29', exact: true }).click()
+    const details = page.getByRole('dialog', { name: 'Reception details' })
+    await details.getByRole('button', { name: 'Close reception details' }).click()
+    await details.waitFor({ state: 'hidden' })
     const result = await page.evaluate(async () => {
       const { agent } = await import('/tests/kitchen-sink-agent.mjs')
-      return agent.act({ steps: [{ ref: 'Go to reception details', action: 'press' }] })
+      return agent.act({ steps: [{ ref: 'Go to details', action: 'press' }] })
     })
     assert.equal(result.ok, true, result.error?.message)
-    const details = page.getByRole('region', { name: 'Reception details' })
     await details.waitFor()
     assert.ok(await details.evaluate(node => node === document.activeElement))
     assert.equal(await details.locator('time').getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
-    const closed = await page.evaluate(async () => {
-      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
-      return agent.act({ steps: [{ ref: 'Close reception details', action: 'press' }] })
-    })
-    assert.equal(closed.ok, true, closed.error?.message)
+    await page.keyboard.press('Escape')
     await details.waitFor({ state: 'hidden' })
+    assert.ok(await page.getByRole('button', { name: 'Go to details', exact: true }).evaluate(node => node === document.activeElement))
   }, loadWithAgent)
 })
 

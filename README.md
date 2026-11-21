@@ -61,8 +61,16 @@ starts only Web and the Aspire dashboard, without PostgreSQL, migrations, or MQT
 Open [Kitchen Sink](http://127.0.0.1:5173/kitchen-sink) to try node roles and
 modifiers, compare compact packet and route badges, inspect packet paths with
 seven indicator styles, and browse channel icons and the mesh logo. In Packet
-traffic, zoom into a time range to update both the histogram and table. Open a
-row to view the reception details, or scroll the table for older receptions.
+traffic, open Arrival time to pick days on the calendar. Missing times default to
+00:00 for From and 23:59:59 for To; you can edit either timestamp. Times use
+Europe/Vilnius, and the To time is exclusive. Choose Apply range, or drag
+across the histogram and choose Zoom. Both apply the same table filter and keep
+the full histogram visible. Try the standalone Searchable multi-select field,
+or use it in the Packet type, Scope, Observer, and Region filters. Search narrows
+the options without changing selections; Only replaces the selection in that
+section. The filter sidebar scrolls independently. Hide filters makes more room
+without clearing selections.
+Open a row to view its reception details, or scroll the table for older receptions.
 The full-range table also demonstrates live feed markers with sample events.
 Map examples reproduce the legacy node states, path evidence, and packet flow
 using a 20 November 2026 [Beacon](https://beacon.atvirastinklas.lt) snapshot: the
