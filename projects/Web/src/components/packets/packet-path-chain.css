@@ -47,11 +47,11 @@
   overflow: clip;
   padding: 0.75rem;
   border: 1px solid var(--ks-control-edge);
-  border-radius: 0.5rem;
+  border-radius: var(--ks-radius);
   background: var(--ks-paper);
   color: var(--ks-ink);
   font: 1rem/1.5 var(--ks-sans);
-  box-shadow: 0 8px 24px rgb(24 36 32 / 16%);
+  box-shadow: 0 8px 24px var(--ks-shadow);
 }
 .ks-path-popover:not([hidden]) {
   display: grid;

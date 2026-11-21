@@ -111,10 +111,10 @@
   text-overflow: ellipsis;
 }
 .packet-reception-table .packet-reception-type .ks-badge { border-color: transparent; background: transparent; padding-inline: 0; }
-.packet-reception-table td:has([data-tone='blue']) { background: #e7f0fa; }
-.packet-reception-table td:has(.ks-type-badge[data-tone='green']) { background: #e5f4eb; }
-.packet-reception-table td:has([data-tone='violet']) { background: #f0eaf9; }
-.packet-reception-table td:has([data-tone='amber']) { background: #faf0dc; }
+.packet-reception-table td:has([data-tone='blue']) { background: var(--ks-blue-fill); }
+.packet-reception-table td:has(.ks-type-badge[data-tone='green']) { background: var(--ks-green-fill); }
+.packet-reception-table td:has([data-tone='violet']) { background: var(--ks-violet-fill); }
+.packet-reception-table td:has([data-tone='amber']) { background: var(--ks-amber-fill); }
 .packet-feed-status td:first-child { position: relative; }
 .packet-feed-status td:first-child::before {
   content: '';

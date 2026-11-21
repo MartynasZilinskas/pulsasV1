@@ -13,7 +13,7 @@
   container-type: inline-size;
   min-inline-size: 0;
   border: 1px solid var(--ks-rule);
-  border-radius: 0.75rem;
+  border-radius: var(--ks-radius);
   background: var(--ks-paper);
 }
 
@@ -94,9 +94,9 @@
 .ks-map-path-key { display: grid; gap: 0.25rem; margin-block-start: 0.625rem; color: var(--ks-muted); font-size: 0.75rem; }
 .ks-map-path-key li { display: flex; align-items: center; gap: 0.5rem; }
 .ks-map-path-key li > span { flex: 0 0 1.125rem; border-block-start: 2px solid var(--ks-accent); }
-.ks-map-path-key .ks-map-possible-line { border-block-start-style: dashed; border-color: #8b5719; }
-.ks-map-path-key .ks-map-gap-symbol { block-size: 0.75rem; border: 1px dashed #8b5719; border-radius: 0.1875rem; }
-.ks-map-path-key .ks-map-ambiguity-symbol { border: 0; color: #8b5719; text-align: center; font-weight: 700; }
+.ks-map-path-key .ks-map-possible-line { border-block-start-style: dashed; border-color: var(--ks-warning); }
+.ks-map-path-key .ks-map-gap-symbol { block-size: 0.75rem; border: 1px dashed var(--ks-warning); border-radius: 0.1875rem; }
+.ks-map-path-key .ks-map-ambiguity-symbol { border: 0; color: var(--ks-warning); text-align: center; font-weight: 700; }
 .ks-map-anchors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.375rem; padding: 0; list-style: none; }
 .ks-map-anchors > li { min-inline-size: 0; }
 .ks-map-anchor, .ks-map-anchor-static {
@@ -168,18 +168,9 @@
 }
 .ks-map-visible-specimen:where(.map-preview[data-map-theme='dark'] ~ *) .ks-map-visible {
   color-scheme: dark;
-  --ks-paper: #202a29;
-  --ks-ground: #293634;
-  --ks-ink: #edf4ee;
-  --ks-muted: #bdcdc4;
-  --ks-rule: #45534d;
-  --ks-control-edge: #73867c;
-  --ks-accent: #92e4bc;
-  --ks-accent-wash: #233f34;
 }
-.ks-map-visible-specimen:where(.map-preview[data-map-theme='dark'] ~ *) .ks-map-visible [data-tone] {
-  --ks-tone-fill: var(--ks-tone-dark-fill);
-  --ks-tone-ink: var(--ks-tone-dark-ink);
+.ks-map-visible-specimen:where(.map-preview[data-map-theme='light'] ~ *) .ks-map-visible {
+  color-scheme: light;
 }
 .ks-map-visible-header { padding: 0.5rem 0.625rem; border-block-end: 1px solid var(--ks-rule); }
 .ks-map-visible-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-block-end: 0.375rem; }

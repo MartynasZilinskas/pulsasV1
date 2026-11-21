@@ -50,14 +50,13 @@ const analytics = createRoute({
   component: () => <SectionPage section="Analytics" />,
 })
 const kitchenSink = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: '/kitchen-sink',
   component: KitchenSinkPage,
 })
 const router = createRouter({
   routeTree: rootRoute.addChildren([
-    appRoute.addChildren([index, packets, channels, map, nodes, observers, analytics]),
-    kitchenSink,
+    appRoute.addChildren([index, packets, channels, map, nodes, observers, analytics, kitchenSink]),
   ]),
   scrollRestoration: true,
 })

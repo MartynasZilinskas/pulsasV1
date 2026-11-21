@@ -1,26 +1,45 @@
 @layer ui-sdk;
 
 :root {
-  --ks-ground: #f6f8f7;
-  --ks-paper: #fff;
-  --ks-ink: #182420;
-  --ks-muted: #53625b;
-  --ks-rule: #d8e1dc;
-  --ks-control-edge: #798980;
-  --ks-accent: #165e47;
-  --ks-accent-wash: #e5f2eb;
+  color-scheme: light;
+  --ks-ground: light-dark(#eae9e4, #13171b);
+  --ks-paper: light-dark(#f6f5f0, #1c2228);
+  --ks-ink: light-dark(#232a30, #e8ebef);
+  --ks-muted: light-dark(#5b626b, #aab3be);
+  --ks-rule: light-dark(#d8d7d1, #39414a);
+  --ks-control-edge: light-dark(#797f86, #75808c);
+  --ks-accent: light-dark(#2857a4, #a0c0ff);
+  --ks-accent-wash: light-dark(#e7edf7, #2b3b54);
+  --ks-on-accent: light-dark(#fff, #17243a);
+  --ks-warning: light-dark(#855514, #f0c37b);
+  --ks-error: light-dark(#a02e3b, #ffadb7);
+  --ks-shadow: light-dark(rgb(26 32 41 / 12%), rgb(0 0 0 / 32%));
+  --ks-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Cpath fill='%23808080' opacity='.13' filter='url(%23grain)' d='M0 0h160v160H0z'/%3E%3C/svg%3E");
+  --ks-drafting-line: light-dark(rgb(35 42 48 / 5%), rgb(232 235 239 / 5%));
+  --ks-blue-fill: light-dark(#e7f0fa, #293d55);
+  --ks-green-fill: light-dark(#e5f4eb, #233f34);
+  --ks-violet-fill: light-dark(#f0eaf9, #3a2e50);
+  --ks-amber-fill: light-dark(#faf0dc, #4a3823);
+  --ks-radius: 0.25rem;
   --ks-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
   --ks-sans: system-ui, sans-serif;
   --ks-mark-fill: var(--ks-paper);
+  background: var(--ks-ground);
+  color: var(--ks-ink);
 }
 
-[data-tone] { --ks-tone-fill: var(--ks-tone-light-fill); --ks-tone-ink: var(--ks-tone-light-ink); }
+[data-theme='light'] { color-scheme: light; }
+[data-theme='dark'] { color-scheme: dark; }
+
+[data-tone] {
+  --ks-tone-fill: light-dark(var(--ks-tone-light-fill), var(--ks-tone-dark-fill));
+  --ks-tone-ink: light-dark(var(--ks-tone-light-ink), var(--ks-tone-dark-ink));
+}
 [data-tone='neutral'] { --ks-tone-light-fill: #eef2f1; --ks-tone-light-ink: #42514c; --ks-tone-dark-fill: #2c3d37; --ks-tone-dark-ink: #d7e6df; }
 [data-tone='green'] { --ks-tone-light-fill: #e5f4eb; --ks-tone-light-ink: #1d5c43; --ks-tone-dark-fill: #233f34; --ks-tone-dark-ink: #a9e2c3; }
 [data-tone='violet'] { --ks-tone-light-fill: #f0eaf9; --ks-tone-light-ink: #574184; --ks-tone-dark-fill: #3a2e50; --ks-tone-dark-ink: #dec8ff; }
 [data-tone='blue'] { --ks-tone-light-fill: #e7f0fa; --ks-tone-light-ink: #294e7e; --ks-tone-dark-fill: #293d55; --ks-tone-dark-ink: #bddaff; }
 [data-tone='amber'] { --ks-tone-light-fill: #faf0dc; --ks-tone-light-ink: #684a15; --ks-tone-dark-fill: #4a3823; --ks-tone-dark-ink: #f7d38c; }
-[data-theme='dark'] [data-tone] { --ks-tone-fill: var(--ks-tone-dark-fill); --ks-tone-ink: var(--ks-tone-dark-ink); }
 
 .ks-glyph { display: block; flex: none; inline-size: 1rem; block-size: 1rem; }
 .ks-mesh-mark, .ks-lucide-glyph { display: block; flex: none; }
@@ -29,4 +48,8 @@
 
 @media (forced-colors: active) {
   :root { --ks-focus: Highlight; }
+}
+
+@media (forced-colors: active), print {
+  :root { --ks-grain: none; --ks-drafting-line: transparent; }
 }

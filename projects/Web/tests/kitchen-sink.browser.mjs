@@ -80,6 +80,15 @@ test('keyboard selects a role, dismisses the picker, and changes both modifiers'
 
     assert.match(await status.innerText(), /Room server · Observer/)
     await page.keyboard.press('Tab')
+    assert.ok(await page.getByRole('link', { name: 'Skip to content', exact: true }).evaluate((node) => node === document.activeElement))
+    await page.keyboard.press('Enter')
+    assert.ok(await page.getByRole('main').evaluate((node) => node === document.activeElement))
+    await page.keyboard.press('Tab')
+    const index = page.getByRole('navigation', { name: 'Specimen index', exact: true })
+    for (const link of await index.getByRole('link').all()) {
+      assert.ok(await link.evaluate(node => node === document.activeElement))
+      await page.keyboard.press('Tab')
+    }
     assert.ok(await page.getByRole('button', { name: 'Pause badge updates', exact: true }).evaluate((node) => node === document.activeElement))
     await page.keyboard.press('Tab')
     assert.ok(await role.evaluate((node) => node === document.activeElement))
@@ -1247,6 +1256,8 @@ test('hiding filters reclaims the rail without clearing the range or inspector',
     assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:14:43.928Z')
 
     await page.getByRole('heading', { name: 'Packet traffic', exact: true }).click()
+    assert.ok(await page.getByRole('main').evaluate(node => node === document.activeElement))
+    await show.focus()
     await traffic.locator('[data-histogram-bucket]').nth(1).click()
     await traffic.getByRole('dialog', { name: 'Selected time range' }).getByRole('button', { name: 'Zoom' }).click()
     assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:29:51.964Z')

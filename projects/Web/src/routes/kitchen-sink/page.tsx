@@ -9,7 +9,6 @@ import {
   SelectValue,
 } from '@ui-sdk/react/select'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { MeshBrandMark } from '../../components/mesh-brand-mark'
 import { NodeAvatar } from '../../components/nodes/node-avatar'
 import { NodeRoleIcon, nodeRoles, type NodeIdentity, type NodeRole } from '../../components/nodes/node-role'
 import { NodeRoleBadge } from '../../components/nodes/node-role-badge'
@@ -32,6 +31,18 @@ const sizes = [
   { name: 'marker', label: 'Marker', pixels: 24 },
   { name: 'contact', label: 'Contact', pixels: 40 },
   { name: 'display', label: 'Display', pixels: 64 },
+] as const
+
+const specimenIndex = [
+  { id: 'ks-live-status-heading', label: 'Status' },
+  { id: 'ks-channels-heading', label: 'Channels' },
+  { id: 'ks-identity-heading', label: 'Node identity' },
+  { id: 'ks-packets-heading', label: 'Packet badges' },
+  { id: 'ks-filter-controls', label: 'Filters' },
+  { id: 'ks-traffic-browser', label: 'Packet traffic' },
+  { id: 'ks-path-heading', label: 'Path evidence' },
+  { id: 'ks-map-heading', label: 'Map examples' },
+  { id: 'ks-mesh-heading', label: 'Mesh icon' },
 ] as const
 
 const glyphPaths = {
@@ -249,36 +260,43 @@ export function KitchenSinkPage() {
   const identity = { role, observer, warning }
 
   return (
-    <main className="ks-page">
+    <div className="ks-page">
       <div className="ks-container">
         <header className="ks-header">
-          <div className="ks-masthead">
-            <span className="ks-brand">
-              <span className="ks-brand-icon">
-                <MeshBrandMark className="ks-glyph" size={20} />
-              </span>
-              Pulsas
-            </span>
-            <span className="ks-fixture-label">Fixture data</span>
-          </div>
           <div className="ks-intro">
-            <p className="ks-kicker">Component workbench</p>
+            <div className="ks-intro-meta">
+              <p className="ks-kicker">Component workbench</p>
+              <span className="ks-fixture-label">Fixture data</span>
+            </div>
             <h1>Kitchen Sink</h1>
             <p>Explore the icons, node identities, and packet details Pulsas uses to describe a mesh network. These examples don’t show live network activity.</p>
           </div>
+          <div className="ks-workbench-caption"><span>Signal Workbench</span><span>Visual trial / UI specimens</span></div>
         </header>
-        <LiveStatusSpecimens />
-        <ChannelKindSpecimens />
-        <NodeIdentityPreview identity={identity} onRole={setRole} onObserver={setObserver} onWarning={setWarning} />
-        <NodeIdentityContext identity={identity} />
-        <RoleSpecimens />
-        <PacketSpecimens />
-        <SearchableMultiSelectSpecimen />
-        <PacketTrafficSpecimens />
-        <PacketPathSpecimens />
-        <MapExamplesSection />
-        <MeshBrandSpecimens />
+        <div className="ks-workbench-layout">
+          <nav className="ks-index" aria-label="Specimen index">
+            <p>Specimen index</p>
+            <ol>
+              {specimenIndex.map(({ id, label }, index) => (
+                <li key={id}><a href={`#${id}`}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>{label}</a></li>
+              ))}
+            </ol>
+          </nav>
+          <div className="ks-specimens">
+            <LiveStatusSpecimens />
+            <ChannelKindSpecimens />
+            <NodeIdentityPreview identity={identity} onRole={setRole} onObserver={setObserver} onWarning={setWarning} />
+            <NodeIdentityContext identity={identity} />
+            <RoleSpecimens />
+            <PacketSpecimens />
+            <div id="ks-filter-controls"><SearchableMultiSelectSpecimen /></div>
+            <div id="ks-traffic-browser"><PacketTrafficSpecimens /></div>
+            <PacketPathSpecimens />
+            <MapExamplesSection />
+            <MeshBrandSpecimens />
+          </div>
+        </div>
       </div>
-    </main>
+    </div>
   )
 }

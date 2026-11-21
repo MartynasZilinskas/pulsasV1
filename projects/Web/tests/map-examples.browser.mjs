@@ -574,8 +574,9 @@ test('clicking a node glyph selects it and zooms in', async () => {
 test('evidence names return below their marker after selection motion when there is room', async () => {
   await withMap(async (page, showcase) => {
     await frameMatching(page, () => window.renderedMap?.sceneId === 'strong')
+    const initialZoom = await page.evaluate(() => window.renderedMap.zoom)
     await showcase.getByRole('button', { name: 'Zoom out', exact: true }).click()
-    await frameMatching(page, () => window.renderedMap?.zoom === 13.5)
+    await frameMatching(page, zoom => window.renderedMap?.zoom === Math.round((zoom - 1) * 100) / 100, initialZoom)
     await page.evaluate(() => window.placementMap.jumpTo({ zoom: 13.75 }))
     await showcase.getByRole('button', { name: /LT-KM Vilijampolė FF.*Repeater/ }).click()
     await frameMatching(page, id => window.renderedMap?.selectedNameplateIds?.includes(id), vilijampole)
@@ -612,7 +613,7 @@ test('evidence names return below their marker after selection motion when there
       map.jumpTo({ center: marker.geometry.coordinates })
     }, root)
     await frameMatching(page, id => window.renderedMap.evidenceLabelIds.includes(id), root)
-  }, { viewport: { width: 1200, height: 850 }, reducedMotion: 'no-preference' }, async page => {
+  }, { viewport: { width: 1440, height: 850 }, reducedMotion: 'no-preference' }, async page => {
     await page.route(/\/src\/components\/map\/map-preview\.tsx(?:\?.*)?$/, async route => {
       const response = await route.fetch()
       const source = await response.text()

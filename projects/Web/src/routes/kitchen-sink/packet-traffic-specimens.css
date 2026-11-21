@@ -1,5 +1,5 @@
 .ks-packet-traffic, .ks-traffic-workspace, .ks-traffic-list, .ks-traffic-filters { min-inline-size: 0; }
-.ks-traffic-layout { display: grid; grid-template-columns: minmax(0, 1fr); border: 1px solid var(--ks-rule); border-radius: 0.625rem; background: var(--ks-paper); }
+.ks-traffic-layout { display: grid; grid-template-columns: minmax(0, 1fr); border: 1px solid var(--ks-rule); border-radius: var(--ks-radius); background: var(--ks-paper); }
 .ks-traffic-layout[data-filter-rail] { grid-template-columns: 14rem minmax(0, 1fr); }
 .ks-traffic-workspace { display: grid; grid-template-columns: minmax(0, 1fr); border-radius: inherit; }
 .ks-traffic-workspace[data-inspecting] { grid-template-columns: minmax(0, 1fr) clamp(18rem, 29%, 20rem); }
@@ -21,7 +21,7 @@
 }
 .ks-traffic-filters-heading, .ks-reception-details-header { padding-inline: 0.75rem; border-block-end: 1px solid var(--ks-rule); background: var(--ks-ground); }
 .ks-traffic-filters-heading, .ks-reception-details-header > :is(h2, h3) { padding-block: 0.625rem; font: 680 0.875rem/1.5 var(--ks-sans); }
-.ks-traffic-filters-heading { border-start-start-radius: 0.625rem; }
+.ks-traffic-filters-heading { border-start-start-radius: var(--ks-radius); }
 .ks-arrival-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; padding: 0.625rem 0.75rem; }
 .ks-traffic-filter-section { border-block-start: 1px solid var(--ks-rule); }
 .ks-traffic-filter-heading {
@@ -80,10 +80,10 @@
   overflow: auto;
   padding: 0.75rem;
   border: 1px solid var(--ks-control-edge);
-  border-radius: 0.5rem;
+  border-radius: var(--ks-radius);
   background: var(--ks-paper);
   color: var(--ks-ink);
-  box-shadow: 0 6px 20px rgb(24 36 32 / 15%);
+  box-shadow: 0 6px 20px var(--ks-shadow);
   font: 0.8125rem/1.4 var(--ks-sans);
 }
 .ks-arrival-editor:not([data-presentation='sheet']) {
@@ -114,8 +114,8 @@
   font-variant-numeric: tabular-nums;
 }
 .ks-arrival-note, .ks-arrival-error { color: var(--ks-muted); font-size: 0.75rem; }
-.ks-arrival-error { color: var(--ks-tone-amber-ink, #84292c); }
-.ks-arrival-bound input[aria-invalid='true'] { border-color: var(--ks-tone-amber-ink, #84292c); }
+.ks-arrival-error { color: var(--ks-error); }
+.ks-arrival-bound input[aria-invalid='true'] { border-color: var(--ks-error); }
 .ks-arrival-calendar { display: grid; gap: 0.25rem; margin-block-start: 0.25rem; }
 .ks-arrival-month { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; }
 .ks-arrival-month-title { color: var(--ks-ink); font: 650 0.8125rem/1.35 var(--ks-sans); text-align: center; }
@@ -147,7 +147,7 @@
 .ks-arrival-calendar :is([data-selected], [data-preview]) { border-block-color: var(--ks-control-edge); background: var(--ks-accent-wash); color: var(--ks-accent); }
 .ks-arrival-calendar [data-range-start] { border-start-start-radius: 0.3125rem; border-end-start-radius: 0.3125rem; }
 .ks-arrival-calendar [data-range-end] { border-start-end-radius: 0.3125rem; border-end-end-radius: 0.3125rem; }
-.ks-arrival-calendar :is([data-range-start], [data-range-end]) { border-block-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-paper); font-weight: 650; }
+.ks-arrival-calendar :is([data-range-start], [data-range-end]) { border-block-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-on-accent); font-weight: 650; }
 .ks-arrival-calendar [data-today] { text-decoration: underline; text-underline-offset: 0.1875rem; }
 .ks-arrival-calendar [data-slot='calendar-day']:focus-visible { outline: 2px solid var(--ks-focus, var(--ks-ink)); outline-offset: -3px; }
 .ks-arrival-calendar :is([data-range-start], [data-range-end]):focus-visible { outline-color: var(--ks-focus, var(--ks-paper)); }
@@ -185,7 +185,7 @@
 }
 .ks-traffic-filter-toggle { display: inline-flex; align-items: center; gap: 0.375rem; min-inline-size: 6.875rem; color: var(--ks-muted); text-align: start; }
 .ks-traffic-filter-toggle svg { flex: none; inline-size: 1rem; block-size: 1rem; }
-.ks-arrival-apply { justify-self: start; min-block-size: 2.375rem; padding-inline: 0.75rem; border-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-paper); }
+.ks-arrival-apply { justify-self: start; min-block-size: 2.375rem; padding-inline: 0.75rem; border-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-on-accent); }
 :is(.ks-traffic-clear, .ks-traffic-filter-toggle, .ks-arrival-trigger, .ks-arrival-apply, .ks-arrival-bound input, .ks-arrival-month-step, .ks-traffic-hash-control input):focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 2px; }
 .ks-arrival-actions .ks-traffic-clear { min-block-size: 2.375rem; }
 .ks-arrival-trigger[data-open] { background: var(--ks-ground); }

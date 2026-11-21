@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pulsas V1</title>
+    <script>
+      (() => {
+        let appearance = 'system'
+        try {
+          const stored = localStorage.getItem('pulsas.appearance')
+          if (stored === 'light' || stored === 'dark') appearance = stored
+        } catch {
+          // Use the system preference when browser storage is unavailable.
+        }
+        document.documentElement.dataset.appearance = appearance
+        document.documentElement.dataset.theme = appearance === 'system'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : appearance
+        document.documentElement.style.colorScheme = document.documentElement.dataset.theme
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

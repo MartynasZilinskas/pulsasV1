@@ -67,7 +67,7 @@
   font: 625 0.75rem/1.3 var(--ks-sans);
   cursor: pointer;
 }
-.time-histogram-confirm-actions button[data-variant='primary'] { border-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-paper); }
+.time-histogram-confirm-actions button[data-variant='primary'] { border-color: var(--ks-accent); background: var(--ks-accent); color: var(--ks-on-accent); }
 .time-histogram-confirm-actions button:focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 2px; }
 .time-histogram-axis {
   position: relative;

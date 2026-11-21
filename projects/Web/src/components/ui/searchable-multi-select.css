@@ -47,7 +47,7 @@
   border: 1px solid var(--ks-control-edge);
   border-radius: 0.25rem;
   background: var(--ks-paper);
-  color: var(--ks-paper);
+  color: var(--ks-on-accent);
   cursor: pointer;
 }
 .ks-searchable-multi-select-check[data-checked] { border-color: var(--ks-accent); background: var(--ks-accent); }
