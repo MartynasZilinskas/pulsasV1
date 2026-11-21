@@ -5,7 +5,7 @@ import { screenOverlaps, type ScreenOverlap } from './map-overlap'
 import { LngLatBounds, Map as MapLibre, Popup, type GeoJSONSource, type MapGeoJSONFeature } from 'maplibre-gl'
 import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react'
 import { clearBasemap, installBasemap, isBasemapError, loadBasemap, restrictMapRequest, type MapPreviewTheme } from './map-preview-basemap-style'
-import { playPreviewFlow, type FlowPlayback, type PreviewFlow } from './map-preview-flow'
+import { playPreviewFlow, type FlowPlayback, type PreviewFlowInput } from './map-preview-flow'
 import {
   ambiguousLayer, applyMapPreviewTheme, chosenSource, clusterLayer, empty, evidenceLabelLayer, excludeRaisedLabels, flowLayers, flowSource, gapHopLayer, gapLayer, hopLayer,
   labelLayer, labelZoom, loadPreviewImages, markerLayer, offlineStyle, pathLayer, previewId, previewRoles, raisedAmbiguousLayer,
@@ -30,10 +30,12 @@ export type MapPreviewScene = {
 type MapPreviewProps = {
   sceneId: string; label: string; center: Coordinates; scene: MapPreviewScene
   selectedId: string | null; focusRequest: number
+  regional?: boolean
   onPick: (ids: readonly string[]) => void
   onClearSelection?: () => void
   onClusterToggle?: (clustered: boolean) => void
-  flow?: readonly PreviewFlow[]; playback?: FlowPlayback | null; onFlowFinish?: () => void
+  onViewportNodesChange?: (ids: readonly string[] | null) => void
+  flow?: PreviewFlowInput; playback?: FlowPlayback | null; onFlowFinish?: () => void
   renderControls?: (ready: boolean) => ReactNode
 }
 
@@ -86,14 +88,30 @@ function visibleClusters(map: MapLibre) {
   return [...clusters.values()].sort((a, b) => b.count - a.count || a.id - b.id)
 }
 
+function viewportNodeIds(map: MapLibre, markers: readonly Marker[]): string[] {
+  const { clientWidth: width, clientHeight: height } = map.getCanvas()
+  const ids = new Set<string>()
+  // Use advertised positions, not rendered features, so clustering and occlusion don't change membership.
+  for (const { id, coordinates, presentation } of markers) {
+    if (presentation === 'gap') continue
+    const { x, y } = map.project([coordinates[0], coordinates[1]])
+    if (x >= 0 && y >= 0 && x <= width && y <= height) ids.add(id)
+  }
+  return [...ids]
+}
+
 const fixtureReportLayers = [
   markerLayer, raisedLayer, pathLayer, weakPathLayer, weakPathHaloLayer, gapLayer, gapHopLayer,
   roleLayer, labelLayer, evidenceLabelLayer, raisedLabelLayer, hopLayer, raisedHopLayer, ambiguousLayer, raisedAmbiguousLayer,
 ]
-const minZoom = 4
+const minZoom = 0
 const maxZoom = 18
 
-export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, onPick, onClearSelection, onClusterToggle, flow, playback, onFlowFinish, renderControls }: MapPreviewProps) {
+function frameDiagnosticsEnabled() {
+  return new URLSearchParams(window.location.search).has('mapDiagnostics')
+}
+
+export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls }: MapPreviewProps) {
   const container = useRef<HTMLDivElement>(null)
   const artwork = useRef<HTMLDivElement>(null)
   const framing = useRef<{ map: MapLibre; sceneId: string } | null>(null)
@@ -114,7 +132,8 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const [clusters, setClusters] = useState<ReturnType<typeof visibleClusters>>([])
   const [clusterError, setClusterError] = useState(false)
   const [centerPickMissed, setCenterPickMissed] = useState(false)
-  const [spiderfy, setSpiderfy] = useState(false)
+  const [spiderfyEnabled, setSpiderfyEnabled] = useState(false)
+  const spiderfy = !regional && spiderfyEnabled
   const [overlaps, setOverlaps] = useState<ScreenOverlap[]>([])
   const [expandedOverlap, setExpandedOverlap] = useState<string | null>(null)
   const overlapGroups = useRef<ScreenOverlap[]>([])
@@ -127,6 +146,8 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const clearPick = useEffectEvent(() => { setExpandedOverlap(null); onClearSelection?.() })
   const finishFlow = useEffectEvent(() => onFlowFinish?.())
   const initialFrame = useEffectEvent((map: MapLibre) => fitScene(map, scene, center, selectedId))
+  const reportViewportNodes = useEffectEvent((ids: readonly string[] | null) => onViewportNodesChange?.(ids))
+  const trackViewportNodes = onViewportNodesChange !== undefined
   const [longitude, latitude] = center
 
   async function expandCluster(map: MapLibre, id: number, coordinates: Coordinates, control?: HTMLElement) {
@@ -364,13 +385,14 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       const ids = renderedIds(features)
       const group = spiderfy && overlapGroups.current.find(group => group.nodes.some(node => ids.includes(node.id)))
       if (group) { hide(); return }
-      const marker = scene.markers.find(marker => marker.id === ids[0])
-      if (!marker) { hide(); return }
-      const text = ids.length > 1 ? 'Multiple nodes here · Select to choose a name' : marker.name ?? marker.label
+      const feature = features[0]
+      if (!ids.length || feature?.geometry.type !== 'Point') { hide(); return }
+      const text = ids.length > 1 ? 'Multiple nodes here · Select to choose a name' : String(feature.properties.name)
       const key = ids.join(':')
       if (key === previous && popup.isOpen()) return
       previous = key
-      popup.setText(text).setLngLat([...marker.coordinates]).addTo(loadedMap)
+      const [longitude, latitude] = feature.geometry.coordinates
+      popup.setText(text).setLngLat([longitude, latitude]).addTo(loadedMap)
     }
     const hover = (event: { point: { x: number; y: number }; originalEvent: MouseEvent }) => {
       if (!matchMedia('(any-hover: hover)').matches) return
@@ -456,7 +478,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   }, [loadedMap, selectedId, onClearSelection, expandedOverlap])
 
   useEffect(() => {
-    if (!loadedMap) return
+    if (!loadedMap || regional) return
     const layers = [labelLayer, evidenceLabelLayer, raisedLabelLayer]
     let hidden = new Map<string, { source: string; id: string }>()
     const fitNames = () => {
@@ -483,7 +505,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       loadedMap.off('render', fitNames)
       for (const feature of hidden.values()) loadedMap.removeFeatureState(feature, 'nameOutsideViewport')
     }
-  }, [loadedMap])
+  }, [loadedMap, regional])
 
   useEffect(() => {
     if (!loadedMap || !roleColors) return
@@ -492,16 +514,29 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
     if (!markers || !paths) return
     let obsolete = false
     let committed = false
+    let reportedReady = false
     let previousReport: string | undefined
+    const diagnostics = frameDiagnosticsEnabled()
+    const listClusters = Boolean(scene.clustered && !regional)
     setClusterError(false)
     const reportRenderedScene = () => {
       // Playback changes its source continuously; neither it nor the basemap gates fixture readiness.
       if (!committed || !['markers', 'paths', chosenSource].every((id) => loadedMap.isSourceLoaded(id))) return
-      const visible = scene.clustered ? visibleClusters(loadedMap) : []
-      const nextClusters = JSON.stringify(visible)
-      if (nextClusters !== clusterSignature.current) {
-        clusterSignature.current = nextClusters
-        setClusters(visible)
+      if (!reportedReady) {
+        reportedReady = true
+        setStatus('ready')
+      }
+      const visible = scene.clustered && (listClusters || diagnostics) ? visibleClusters(loadedMap) : []
+      if (!regional) {
+        const nextClusters = JSON.stringify(visible)
+        if (nextClusters !== clusterSignature.current) {
+          clusterSignature.current = nextClusters
+          setClusters(visible)
+        }
+      }
+      if (!diagnostics) {
+        if (!listClusters) loadedMap.off('render', reportRenderedScene)
+        return
       }
       const features = new Map<string, MapGeoJSONFeature[]>()
       for (const feature of loadedMap.queryRenderedFeatures({ layers: fixtureReportLayers })) {
@@ -529,7 +564,6 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       }
       const signature = JSON.stringify(detail)
       if (signature === previousReport) return
-      if (previousReport === undefined) setStatus('ready')
       previousReport = signature
       loadedMap.getContainer().dispatchEvent(new CustomEvent('map-preview-rendered', {
         bubbles: true, detail,
@@ -561,7 +595,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       setStatus('error')
     })
     return () => { obsolete = true; loadedMap.off('render', reportRenderedScene) }
-  }, [loadedMap, roleColors, sceneId, scene])
+  }, [loadedMap, roleColors, sceneId, scene, regional])
 
   useEffect(() => {
     if (!loadedMap || !roleColors) return
@@ -572,11 +606,33 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       // MapLibre reports source errors through the map's error handler.
     })
     if (selected && focusRequest !== lastFocus.current) {
-      const zoom = Math.max(labelZoom + 0.5, loadedMap.getZoom(), zoomTarget.current ?? minZoom)
+      const zoom = Math.max(labelZoom + (regional ? 1 : 0.5), loadedMap.getZoom(), zoomTarget.current ?? minZoom)
       loadedMap.easeTo({ center: [...selected.coordinates], zoom, duration: 420 })
     }
     lastFocus.current = focusRequest
-  }, [loadedMap, roleColors, scene, selectedId, focusRequest])
+  }, [loadedMap, roleColors, scene, selectedId, focusRequest, regional])
+
+  useEffect(() => {
+    if (!trackViewportNodes) return
+    if (!loadedMap || status !== 'ready') {
+      reportViewportNodes(null)
+      return
+    }
+
+    let previous: readonly string[] | undefined
+    const update = () => {
+      if (loadedMap.isMoving()) return
+      const ids = viewportNodeIds(loadedMap, scene.markers)
+      const last = previous
+      if (last?.length === ids.length && ids.every((id, index) => id === last[index])) return
+      previous = ids
+      reportViewportNodes(ids)
+    }
+    // MapLibre emits moveend after a resize when idle, or when the ongoing movement settles.
+    loadedMap.on('moveend', update)
+    update()
+    return () => { loadedMap.off('moveend', update) }
+  }, [loadedMap, status, scene.markers, trackViewportNodes])
 
   useEffect(() => {
     if (!loadedMap || status !== 'ready' || !flow || !playback || document.hidden) return
@@ -589,15 +645,15 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   }, [loadedMap, status, flow, playback])
 
   useEffect(() => {
-    if (!loadedMap || !flow) return
-    const flowIds = new Set(flow.map(({ id }) => id))
+    if (!loadedMap || !flow || !frameDiagnosticsEnabled()) return
+    const flowIds = typeof flow === 'function' ? null : new Set(flow.map(({ id }) => id))
     let previous: string | undefined
     const reportFlow = () => {
       const routes = new globalThis.Map<string, Set<string>>()
       for (const { properties } of loadedMap.queryRenderedFeatures({ layers: flowLayers })) {
         const { route, kind } = properties
         if (typeof route !== 'string' || typeof kind !== 'string') continue
-        if (!flowIds.has(route)) return
+        if (flowIds && !flowIds.has(route)) return
         const kinds = routes.get(route) ?? new Set<string>()
         kinds.add(kind)
         routes.set(route, kinds)
@@ -649,11 +705,11 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
           <Radio className="map-preview-button" value="light">Light</Radio>
           <Radio className="map-preview-button" value="dark">Dark</Radio>
         </RadioGroup>
-        <div className="map-preview-control-pair">
+        {(!regional || onClusterToggle) && <div className="map-preview-control-pair">
           {onClusterToggle && <Button className="map-preview-button" aria-pressed={scene.clustered ?? false} disabled={!ready} onClick={() => onClusterToggle(!scene.clustered)}>Clustering</Button>}
-          <Button className="map-preview-button" aria-pressed={spiderfy} disabled={!ready} onClick={() => setSpiderfy(value => !value)}>Spiderfy</Button>
-        </div>
-        <Button className="map-preview-button" disabled={!ready} onClick={() => { if (loadedMap) fitScene(loadedMap, scene, center, selectedId) }}>Fit example</Button>
+          {!regional && <Button className="map-preview-button" aria-pressed={spiderfy} disabled={!ready} onClick={() => setSpiderfyEnabled(value => !value)}>Spiderfy</Button>}
+        </div>}
+        <Button className="map-preview-button" disabled={!ready} onClick={() => { if (loadedMap) fitScene(loadedMap, scene, center, selectedId) }}>{regional ? 'Fit all nodes' : 'Fit example'}</Button>
         <div className="map-preview-control-pair">
           <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom out" disabled={!ready || zoom <= minZoom} onClick={() => changeZoom(-1)}>−</Button>
           <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom in" disabled={!ready || zoom >= maxZoom} onClick={() => changeZoom(1)}>+</Button>
@@ -680,12 +736,13 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
         {basemapStatus === 'error' && <Button className="map-preview-button" onClick={() => setBasemapAttempt((value) => value + 1)}>Retry basemap</Button>}
       </div>
       <p className="map-preview-help" id={descriptionId}>Drag or use arrow keys to pan. On touch, use two fingers. Use the map controls or + / − to zoom. Select a node to zoom in. Press Enter on the map to select a node or expand a cluster at the crosshair.{onClearSelection && ' Press Escape on the map to clear selection.'}</p>
-      {ready && scene.clustered && (clusters.length > 0 || clusterError) && <div className="map-preview-clusters">
+      {ready && scene.clustered && !regional && (clusters.length > 0 || clusterError) && <div className="map-preview-clusters">
         {clusters.map(({ id, count, coordinates }, index) => <Button key={id} className="map-preview-button" onClick={(event) => { if (loadedMap) void expandCluster(loadedMap, id, coordinates, event.currentTarget) }}>
           Expand {clusters.length > 1 ? `cluster ${index + 1}` : 'cluster'} · {count} nodes
         </Button>)}
         {clusterError && <p role="status">This cluster couldn’t expand. Turn off clustering to see individual nodes.</p>}
       </div>}
+      {ready && regional && clusterError && <p className="map-preview-help" role="status">This cluster couldn’t expand. Turn off clustering or use Find node.</p>}
     </div>
   )
 }

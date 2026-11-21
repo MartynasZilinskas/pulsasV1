@@ -84,6 +84,16 @@ worker and loads the geographic background from [OpenFreeMap](https://openfreema
 when the map opens: Positron for Light and the OpenFreeMap Dark style for Dark.
 If the provider is unavailable, the fixture overlays still work on a schematic
 background. The showcase does not connect to Gateway or a live node registry.
+Under **Map examples → Node states → 5,000 regional nodes**, the map uses a
+synthetic fixture spanning the Baltics, Nordic countries, and Poland. It starts
+with native clusters enabled; use **Clustering** to show individual nodes.
+Turn on **Simulated traffic** to watch several packets hop between random
+fixture nodes at once without moving the map. With reduced motion, two static
+routes update one at a time. This is synthetic traffic, not a live feed.
+Use **Fit all nodes** to return to the overview and **Find node** to search by
+name or ID. **Visible nodes** has its own search for the current map view,
+including nodes represented by a cluster or covered by another marker. The
+search stays above a continuously scrolling list.
 The local Web resource is not published.
 
 With the Web resource running, use `mise exec -- npm run test:browser` from
@@ -181,23 +191,40 @@ stored reasons and counts; raw packets and support source records are not expose
 `meshTrafficSummary(from: Instant!, to: Instant!, filter: MeshTrafficFilterInput)`
 requires explicit server-arrival bounds. The interval includes `from` and excludes
 `to` and may be up to 30 days long. Clients resolve presets to explicit instants.
-Optional filters match observer IDs, exact region codes, and packet types.
+Filters apply to stored receptions before aggregation. A reception must match
+each nonempty filter list and can match any value within a list. Omitted or empty
+lists do not restrict the result. The region is the receiving region recorded on
+the reception, not the observer's current region or the sender's location. Region
+codes match exactly, including case and whitespace. A packet-type filter excludes
+receptions without a linked packet; without that filter, they still count as
+receptions and can contribute signal samples.
 
-The summary counts stored receptions, distinct wire packets, and distinct encoded
-payloads separately; none is a count of physical transmissions.
-`activeObserverCount` and `activeRegionCount` count distinct observers and exact
-region codes among matching receptions, not currently online observers or
-configured regions. `packetTypeCounts` partitions matching receptions by stored
-packet type; the final `null` type, when present, counts receptions without a
-linked packet. Only types with matching receptions are listed. SNR and RSSI
-each report their own sample count and a mean, which is `null` without samples.
-The mean gives each valid reading equal weight; it is not an average of bucket
-means. SNR uses PostgreSQL numeric accumulation of the stored doubles' round-trip
-decimal values so the intermediate sum can exceed the double range.
+| Metric | What it counts in the selected window |
+| --- | --- |
+| `receptionCount` | One row per stored matching reception after ingestion deduplication. |
+| `wirePacketCount` | One per unique set of complete frame bytes among linked packets. Different encoded paths are distinct frames. |
+| `sharedPayloadCount` | One per distinct linked encoded payload, identified by packet type, payload version, and payload bytes, regardless of wire path. |
+| `activeObserverCount` and `activeRegionCount` | Distinct observers and exact receiving region codes in matching receptions, not online observers or configured region inventory. |
+| `packetTypeCounts` | Matching receptions partitioned by linked packet type; a final `null` type counts unlinked receptions when present. Types with no matching receptions are omitted. |
+
+None of the three traffic counts measures physical transmissions. If one frame
+is recorded by two observers in different hours, the window summary counts two
+receptions, one wire packet, and one shared payload. Do not add distinct counts
+across buckets, observers, or regions to get a window total. The denominator for
+a packet-type share is `receptionCount` under the same filters, including the
+unclassified group when present.
+
+Each signal mean uses its own valid-sample count as the denominator: finite
+stored SNR readings for SNR, non-null stored RSSI readings for RSSI. Missing
+readings are not zeroes; no samples means a zero sample count and a `null` mean.
+To combine means from disjoint buckets, weight by the corresponding signal's
+sample count. SNR uses PostgreSQL numeric accumulation of the stored doubles'
+round-trip decimal values so the intermediate sum can exceed the double range.
 The tag list groups matching payloads and their receptions by current stored tag.
 It is empty when no tags match; groups can overlap and should not be added to
-the overall totals. History coverage is `UNKNOWN`, including for empty windows.
-Later ingestion can change a previously queried window.
+the overall totals. History coverage is `UNKNOWN`, including for empty windows:
+zero stored samples does not establish radio silence or confirm that history is
+unavailable. Later ingestion can change a previously queried window.
 
 ### Traffic and signal trends
 

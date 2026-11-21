@@ -154,6 +154,28 @@ body:has(.ks-page) { margin: 0; }
 .ks-size-sample { display: grid; place-items: center; inline-size: 4.25rem; min-block-size: 4.5rem; }
 .ks-size-strip code { color: var(--ks-muted); font-size: 0.75rem; }
 
+.ks-live-status-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.625rem 1rem; }
+.ks-live-status-control {
+  min-block-size: 2.75rem;
+  min-inline-size: min(100%, 11rem);
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--ks-control-edge);
+  border-radius: 0.4375rem;
+  background: var(--ks-paper);
+  color: var(--ks-ink);
+  font: 650 0.8125rem/1.4 var(--ks-sans);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.ks-live-status-control:focus-visible { outline: 2px solid var(--ks-focus, var(--ks-accent)); outline-offset: 3px; }
+.ks-live-status-control:active { background: var(--ks-accent-wash); }
+@media (hover: hover) {
+  .ks-live-status-control:hover:not(:active) { background: var(--ks-ground); }
+}
+.ks-live-status-surfaces { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); }
+.ks-live-status-surface { min-block-size: 5.375rem; }
+.ks-live-status-surface > .ks-badge-list { align-content: center; justify-content: center; gap: 0.5rem; padding-block-start: 0.375rem; }
+
 .ks-channel-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.625rem; }
 .ks-channel { display: grid; grid-template-rows: 1fr auto auto; gap: 0.375rem; padding: 0.5rem; border: 1px solid var(--ks-rule); border-radius: 0.625rem; background: var(--ks-paper); }
 .ks-channel-heading { padding: 0.375rem; }

@@ -1,5 +1,8 @@
+import { Button } from '@ui-sdk/react/button'
+import { useState } from 'react'
 import { ChannelKindIcon } from '../../components/channels/channel-kind-icon'
 import { MeshBrandMark } from '../../components/mesh-brand-mark'
+import { LiveStatusBadge } from '../../components/ui/live-status-badge'
 
 const channels = [
   { kind: 'public', label: 'Public channel', description: 'The standard Public channel.' },
@@ -10,6 +13,39 @@ const surfaces = [
   { theme: 'light', label: 'Light surface' },
   { theme: 'dark', label: 'Dark surface' },
 ] as const
+
+export function LiveStatusSpecimens() {
+  const [staleSince] = useState(() => Date.now())
+  const [paused, setPaused] = useState<boolean>()
+
+  return (
+    <section className="ks-section" aria-labelledby="ks-live-status-heading">
+      <header className="ks-section-heading ks-live-status-heading">
+        <div>
+          <h2 id="ks-live-status-heading">Live status badge</h2>
+          <p>Both states are simulated. The Stale timer counts from an example start time, not a network event.</p>
+        </div>
+        <Button className="ks-live-status-control" aria-controls="ks-live-status-preview" onClick={() => setPaused((current) => !current)}>
+          {paused ? 'Resume badge updates' : 'Pause badge updates'}
+        </Button>
+      </header>
+      <p className="ks-visually-hidden" role="status">
+        {paused === undefined ? '' : paused ? 'Badge updates paused.' : 'Badge updates resumed.'}
+      </p>
+      <div id="ks-live-status-preview" className="ks-surfaces ks-live-status-surfaces">
+        {surfaces.map(({ theme, label }) => (
+          <figure className="ks-surface ks-live-status-surface" data-theme={theme} key={theme}>
+            <figcaption>{label}</figcaption>
+            <ul className="ks-badge-list">
+              <li><LiveStatusBadge state="live" paused={paused} /></li>
+              <li><LiveStatusBadge state="stale" staleSince={staleSince} paused={paused} /></li>
+            </ul>
+          </figure>
+        ))}
+      </div>
+    </section>
+  )
+}
 
 export function ChannelKindSpecimens() {
   return (

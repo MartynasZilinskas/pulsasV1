@@ -5,9 +5,10 @@ import { createServer } from 'vite'
 import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec'
 
 test('selected markers stay compact across the dot threshold while unselected roles begin at zoom 9 and names at zoom 12', async () => {
-  const vite = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false, server: { middlewareMode: true, hmr: false }, optimizeDeps: { noDiscovery: true } })
+  const vite = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
+    server: { middlewareMode: true, hmr: false, ws: false, watch: null }, optimizeDeps: { noDiscovery: true } })
   try {
-    const { offlineStyle } = await vite.ssrLoadModule('/src/components/map/map-preview-style.ts')
+    const { applyMapPreviewTheme, offlineStyle } = await vite.ssrLoadModule('/src/components/map/map-preview-style.ts')
     const evaluate = (input, zoom, properties) => {
       if (!Array.isArray(input) || typeof input[0] !== 'string') return input
       const expression = createExpression(input, 'test')
@@ -15,12 +16,9 @@ test('selected markers stay compact across the dot threshold while unselected ro
       return expression.value.evaluate({ zoom }, { type: 'Point', properties })
     }
     const stable = {
-      'preview-role-face': ['paint', ['circle-radius', 'circle-stroke-width']],
-      'preview-confidence-ring': ['paint', ['circle-radius']],
       'preview-raised-confidence-ring': ['paint', ['circle-radius']],
       'preview-raised-confidence-ink': ['paint', ['circle-radius']],
       'preview-raised-ordinary-ring': ['paint', ['circle-radius']],
-      'preview-raised-role-face': ['paint', ['circle-radius', 'circle-stroke-width']],
       'preview-hop-number': ['layout', ['text-offset']],
       'preview-ambiguous': ['layout', ['text-offset']],
       'preview-raised-hop': ['layout', ['text-offset']],
@@ -40,12 +38,9 @@ test('selected markers stay compact across the dot threshold while unselected ro
         }
         for (const zoom of [8.5, 8.99, 9, 9.5, 12.5]) {
           const evidence = 'confidence' in properties
-          const visibleCircles = [
-            ['preview-raised-role-face', 9, 1],
-            ...(evidence
-              ? [['preview-raised-confidence-ring', 15, 4], ['preview-raised-confidence-ink', 14, 3]]
-              : [['preview-raised-ordinary-ring', 12.5, 2]]),
-          ]
+          const visibleCircles = evidence
+            ? [['preview-raised-confidence-ring', 15, 4], ['preview-raised-confidence-ink', 14, 3]]
+            : [['preview-raised-ordinary-ring', 12.5, 2]]
           for (const [id, radius, stroke] of visibleCircles) {
             const circle = layer(id)
             assert.ok((circle.minzoom ?? 0) <= zoom, `${id} visible at ${zoom}`)
@@ -71,32 +66,54 @@ test('selected markers stay compact across the dot threshold while unselected ro
         }
       }
       assert.equal(layer('preview-role').minzoom, 9)
-      assert.equal(layer('preview-role-face').minzoom, 9)
-      const colors = { roleInk: '#574184', roleFill: '#f0eaf9', roleDarkInk: '#dec8ff', roleDarkFill: '#3a2e50', roleImage: 'node-role-REPEATER' }
-      for (const id of ['preview-role-face', 'preview-raised-role-face']) {
-        for (const zoom of id === 'preview-raised-role-face' ? [8.5, 9.5, 12.5] : [12.5]) {
-          assert.equal(evaluate(layer(id).paint['circle-color'], zoom, colors), theme === 'dark' ? colors.roleDarkFill : colors.roleFill)
-          assert.equal(evaluate(layer(id).paint['circle-stroke-color'], zoom, colors), theme === 'dark' ? colors.roleDarkInk : colors.roleInk)
-        }
-      }
+      assert.equal(layer('preview-confidence-ring').maxzoom, 9)
+      assert.equal(layer('preview-role-face'), undefined)
+      assert.equal(layer('preview-raised-role-face'), undefined)
+      const layerIds = style.layers.map(({ id }) => id)
+      assert.ok(layerIds.indexOf('preview-raised-role') > layerIds.indexOf('preview-role'))
+      const themedIcons = new Map()
+      applyMapPreviewTheme({ setPaintProperty() {}, setLayoutProperty: (id, property, value) => {
+        if (property === 'icon-image') themedIcons.set(id, value)
+      } }, theme)
       for (const id of ['preview-role', 'preview-raised-role']) {
-        assert.equal(evaluate(layer(id).layout['icon-image'], 12.5, colors), `node-role-REPEATER${theme === 'dark' ? '-dark' : ''}`)
-      }
-      for (const id of ['preview-role', 'preview-raised-role']) {
-        for (const zoom of id === 'preview-raised-role' ? [8.5, 9.5, 12.5, 18] : [9, 11.5, 12.5, 18]) {
-          assert.ok((layer(id).minzoom ?? 0) <= zoom)
+        const badge = layer(id)
+        const raised = id === 'preview-raised-role'
+        assert.equal(badge.type, 'symbol')
+        assert.equal(badge.layout['symbol-z-order'], 'source')
+        assert.equal(badge.layout['icon-allow-overlap'], true)
+        assert.equal(badge.layout['icon-ignore-placement'], true)
+        assert.equal(badge.layout['icon-size'] ?? 1, 1)
+        const icon = badge.layout['icon-image']
+        assert.deepEqual(themedIcons.get(id), icon)
+        const suffix = theme === 'dark' ? '-dark' : ''
+        for (const zoom of raised ? [8.5, 9.5, 12.5, 18] : [9, 11.5, 12.5, 18]) {
+          assert.ok((badge.minzoom ?? 0) <= zoom)
           for (const role of ['CLIENT', 'ROOM_SERVER', 'REPEATER', 'SENSOR', 'NONE']) {
-            assert.equal(evaluate(layer(id).layout['icon-size'], zoom, { roleImage: `node-role-${role}` }), ['CLIENT', 'ROOM_SERVER'].includes(role) ? 0.8 : 1)
+            const roleImage = `node-role-${role}`
+            assert.equal(evaluate(icon, zoom, { roleImage }), `${roleImage}${suffix}`)
+            for (const confidence of ['weak', 'strong']) {
+              assert.equal(evaluate(icon, zoom, { roleImage, confidence }), `${roleImage}${raised ? '' : `-${confidence}`}${suffix}`)
+            }
           }
+          assert.equal(evaluate(icon, zoom, {}), `node-role-NONE${suffix}`)
         }
       }
+      const roleFilter = layer('preview-role').filter
+      assert.equal(evaluate(roleFilter, 9, {}), true)
+      assert.equal(evaluate(roleFilter, 9, { point_count: 2 }), false)
+      assert.equal(evaluate(roleFilter, 9, { presentation: 'gap' }), false)
       assert.equal(layer('preview-name').minzoom, 12)
       assert.equal(layer('preview-evidence-name').minzoom, undefined)
       assert.equal(evaluate(layer('preview-marker').paint['circle-radius'], 8.5, {}), 5)
       assert.equal(evaluate(layer('preview-marker').paint['circle-radius'], 8.5, { confidence: 'weak' }), 6)
       assert.equal(evaluate(layer('preview-confidence-ring').paint['circle-radius'], 8.5, { confidence: 'weak' }), 10)
       assert.equal(evaluate(layer('preview-marker').paint['circle-opacity'], 8.5, {}), 1)
-      assert.equal(evaluate(layer('preview-marker').paint['circle-opacity'], 9, {}), 0)
+      for (const properties of [{}, { confidence: 'weak' }]) {
+        const hit = layer('preview-marker').paint
+        assert.equal(evaluate(hit['circle-radius'], 9, properties), properties.confidence ? 16 : 18)
+        assert.equal(evaluate(hit['circle-opacity'], 9, properties), 0)
+        assert.equal(evaluate(hit['circle-stroke-opacity'], 9, properties), 0)
+      }
       assert.deepEqual(layer('preview-raised-label').layout['icon-text-fit-padding'], [0, 6, 2, 6])
       const evidence = layer('preview-evidence-name').layout
       assert.equal(evidence['text-variable-anchor-offset'], undefined)

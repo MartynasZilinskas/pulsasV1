@@ -3,6 +3,7 @@ import { pathScene, type EvidenceAnchor as Anchor, type EvidenceHop, type Eviden
 import type { NodeRole } from '../../components/nodes/node-role'
 import type { PacketPathHop } from '../../components/packets/packet-path-chain'
 import { mapAnchors, mapShowcaseCenter, unlocatedMapAnchor } from './map-fixtures'
+import { regionalMapAnchors } from './regional-map-fixture'
 
 type Position = readonly [number, number]
 type Marker = MapPreviewScene['markers'][number]
@@ -35,6 +36,8 @@ function nodes(id: string, label: string, description: string, anchors: readonly
 }
 
 const nodeExamples: readonly MapExample[] = [
+  nodes('regional-nodes', '5,000 regional nodes', 'Synthetic nodes across the Baltics, Nordic countries, and Poland. Expand a cluster or find a node by name.',
+    regionalMapAnchors, { clustered: true }),
   nodes('dots', 'Distant dots', 'Role-coloured points below zoom 9.', mapAnchors, { zoom: 8.5 }),
   nodes('roles', 'Role glyphs', 'Shared node role artwork from zoom 9.', mapAnchors, { zoom: 10.5 }),
   nodes('labels', 'Labels & collision', 'Names appear from zoom 12. A hidden label does not hide its marker.', mapAnchors, { zoom: 12.5 }),

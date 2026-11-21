@@ -3,7 +3,7 @@ import { Checkbox, CheckboxIndicator } from '@ui-sdk/react/checkbox'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@ui-sdk/react/collapsible'
 import { Select, SelectContent, SelectItem, SelectItemIndicator, SelectLabel, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack, SliderValue } from '@ui-sdk/react/slider'
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { evidenceCandidateKey, pathScene, type EvidenceAnchor } from '../../components/map/map-path-evidence'
 import { MapPreview } from '../../components/map/map-preview'
 import type { FlowPlayback } from '../../components/map/map-preview-flow'
@@ -13,6 +13,10 @@ import { PacketPathChain } from '../../components/packets/packet-path-chain'
 import { LucideGlyph } from '../../components/ui/lucide-glyph'
 import { mapCatalogue, type MapExample } from './map-catalogue'
 import { mapShowcaseCenter } from './map-fixtures'
+import { MapNodeFinder } from './map-node-finder'
+import { MapVisibleNodes } from './map-visible-nodes'
+import { nextRegionalFlow } from './regional-map-fixture'
+import { RegionalTrafficControl } from './regional-traffic-control'
 
 const modes = [
   { id: 'nodes', label: 'Node states' }, { id: 'paths', label: 'Path evidence' }, { id: 'flow', label: 'Packet flow' },
@@ -58,6 +62,10 @@ export default function MapSpecimens() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [focusRequest, setFocusRequest] = useState(0)
   const [overlap, setOverlap] = useState<readonly string[]>([])
+  const [nodeQuery, setNodeQuery] = useState('')
+  const [viewportNodes, setViewportNodes] = useState<readonly string[] | null>(null)
+  const nodeSearch = useRef<HTMLInputElement>(null)
+  const overlapOrigin = useRef<HTMLCanvasElement | null>(null)
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
   const [clusterOverride, setClusterOverride] = useState<boolean | undefined>(undefined)
   const [playback, setPlayback] = useState<FlowPlayback | null>(null)
@@ -66,7 +74,8 @@ export default function MapSpecimens() {
   const [systemReduced, setSystemReduced] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
   const examples = mapCatalogue[mode]
   const example = examples.find(({ id }) => id === scenarios[mode])!
-  const selected = example.anchors.find(({ id }) => id === selectedId)
+  const isRegional = example.id === 'regional-nodes'
+  const selected = isRegional ? undefined : example.anchors.find(({ id }) => id === selectedId)
   const reduced = systemReduced || forceReduced
   const pathId = example.id === 'strong' ? 'single-strong' : example.id
   const scene = useMemo(() => {
@@ -87,9 +96,16 @@ export default function MapSpecimens() {
     return () => { media.removeEventListener('change', motion); document.removeEventListener('visibilitychange', visibility) }
   }, [])
 
+  useEffect(() => {
+    if (isRegional && overlap.length) nodeSearch.current?.focus()
+  }, [isRegional, overlap])
+
   function reset(next: MapExample) {
     setSelectedId(next.selectedId ?? null)
     setOverlap([])
+    setNodeQuery('')
+    setViewportNodes(null)
+    overlapOrigin.current = null
     setClusterOverride(undefined)
     setHidden(new Set())
     setPlayback(null)
@@ -108,9 +124,39 @@ export default function MapSpecimens() {
   }
 
   function select(id: string, focus: boolean) {
+    if (isRegional && overlap.length) setNodeQuery('')
+    overlapOrigin.current = null
     setOverlap([])
     setSelectedId(id)
     if (focus) setFocusRequest((value) => value + 1)
+  }
+
+  function pickOnMap(ids: readonly string[]) {
+    if (ids.length === 1) select(ids[0], true)
+    else {
+      if (isRegional) {
+        const origin = document.activeElement
+        overlapOrigin.current = origin instanceof HTMLCanvasElement ? origin : null
+        setNodeQuery('')
+      }
+      setOverlap(ids)
+    }
+  }
+
+  function exitRegionalOverlap(restoreCanvasFocus: boolean) {
+    const origin = overlapOrigin.current
+    const target = restoreCanvasFocus && origin?.isConnected ? origin : nodeSearch.current
+    setOverlap([])
+    setNodeQuery('')
+    overlapOrigin.current = null
+    target?.focus()
+  }
+
+  function clearMapSelection() {
+    if (isRegional && overlap.length) setNodeQuery('')
+    setSelectedId(null)
+    setOverlap([])
+    overlapOrigin.current = null
   }
 
   function focusAnchor(anchor: EvidenceAnchor, hopIndex?: number) {
@@ -161,12 +207,16 @@ export default function MapSpecimens() {
           </div>
           <MapPreview
             sceneId={example.id} label={`${example.label} fixture map`} center={mapShowcaseCenter} scene={scene}
-            selectedId={selectedId} focusRequest={focusRequest}
-            onPick={(ids) => { if (ids.length === 1) select(ids[0], true); else setOverlap(ids) }}
-            onClearSelection={() => { setSelectedId(null); setOverlap([]) }}
+            selectedId={selectedId} focusRequest={focusRequest} regional={isRegional}
+            onPick={pickOnMap}
+            onClearSelection={clearMapSelection}
+            onViewportNodesChange={isRegional ? setViewportNodes : undefined}
             onClusterToggle={mode === 'nodes' ? setClusterOverride : undefined}
-            flow={example.flows} playback={playback} onFlowFinish={() => setPlayback(null)}
-            renderControls={mode !== 'flow' ? undefined : (ready) => (
+            flow={isRegional ? nextRegionalFlow : example.flows} playback={playback} onFlowFinish={() => setPlayback(null)}
+            renderControls={isRegional ? (ready) => (
+              <RegionalTrafficControl ready={ready} running={playback !== null} reduced={systemReduced}
+                onToggle={() => setPlayback(current => current ? null : { mode: 'loop', hopMs: 950, reduced: systemReduced })} />
+            ) : mode !== 'flow' ? undefined : (ready) => (
               <div className="ks-map-playback">
                 <div className="ks-map-playback-actions">
                   <Button className="map-preview-button" disabled={!ready} onClick={() => setPlayback({ mode: 'once', hopMs, reduced })}>Play once</Button>
@@ -179,7 +229,21 @@ export default function MapSpecimens() {
               </div>
             )}
           />
-          <div className="ks-map-inspector">
+          {isRegional ? <>
+            <MapNodeFinder anchors={example.anchors} overlap={overlap} selectedId={selectedId}
+              input={nodeSearch} query={nodeQuery} onQueryChange={setNodeQuery}
+              onSelect={(id) => {
+                if (overlap.length) nodeSearch.current?.focus()
+                select(id, true)
+              }}
+              onClearSelection={() => { nodeSearch.current?.focus(); clearMapSelection() }}
+              onExitOverlap={exitRegionalOverlap}
+            />
+            <div className="ks-map-visible-specimen">
+              <MapVisibleNodes anchors={example.anchors} ids={viewportNodes} selectedId={selectedId}
+                onSelect={(id) => select(id, true)} />
+            </div>
+          </> : <div className="ks-map-inspector">
             {example.hops && <div className="ks-map-path">
               <h4>Raw hop chain</h4>
               <p className="ks-map-inspector-note">Generated evidence. Map filters do not change the reported candidates.</p>
@@ -275,7 +339,7 @@ export default function MapSpecimens() {
                 {selected && <Button className="map-preview-button" onClick={() => { setSelectedId(null); setOverlap([]) }}>Clear selection</Button>}
               </div>
             </div>}
-          </div>
+          </div>}
         </div>
       </div>
     </div>

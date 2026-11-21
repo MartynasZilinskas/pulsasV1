@@ -4,6 +4,7 @@ import { chromium } from 'playwright'
 
 const origin = `http://127.0.0.1:${process.env.PULSAS_WEB_TEST_PORT ?? 5173}`
 const url = `${origin}/kitchen-sink`
+const diagnosticsUrl = `${url}?mapDiagnostics`
 const provider = 'https://tiles.openfreemap.org'
 const providerAttribution = '<a href="https://openfreemap.org/">OpenFreeMap</a> © <a href="https://openmaptiles.org/">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 const testTile = Buffer.from('GiB4AgoFd2F0ZXIogCASEhgDIg4JQEAagCAAAIAU/x8ADw==', 'base64') // One MVT water polygon.
@@ -26,7 +27,7 @@ const pathCases = [
   ['Only unresolved prefix', 'unresolved', [], 0, 0],
   ['Missing outer hops', 'exterior-missing', [root], 0, 0],
 ]
-const nodeCases = ['Distant dots', 'Role glyphs', 'Labels & collision', 'Raised selection', 'Clusters & counts',
+const nodeCases = ['5,000 regional nodes', 'Distant dots', 'Role glyphs', 'Labels & collision', 'Raised selection', 'Clusters & counts',
   'Every role & fallback', 'Overlapping markers', 'Near-overlapping markers', 'Dense overlapping markers', 'Long node label']
 const flowCases = [
   ['Moving packet & trail', 'route', 1, ['arrival', 'trail']],
@@ -63,7 +64,7 @@ before(async () => {
 
 after(async () => { await browser?.close() })
 
-async function withMap(verify, options = {}, prepare, providerResponse = mockProvider) {
+async function withMap(verify, { diagnostics = true, ...options } = {}, prepare, providerResponse = mockProvider) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 750 }, reducedMotion: 'reduce', ...options })
   page.setDefaultTimeout(8000)
   const external = []
@@ -89,7 +90,7 @@ async function withMap(verify, options = {}, prepare, providerResponse = mockPro
       document.addEventListener('map-preview-flow-rendered', event => { window.renderedFlow = event.detail })
     })
     if (await prepare?.(page) === false) return
-    assert.equal((await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 })).status(), 200)
+    assert.equal((await page.goto(diagnostics ? diagnosticsUrl : url, { waitUntil: 'domcontentloaded', timeout: 12000 })).status(), 200)
     const showcase = page.getByRole('region', { name: 'Map examples', exact: true })
     await showcase.scrollIntoViewIfNeeded({ timeout: 10000 })
     await verify(page, showcase, workers)
@@ -1034,6 +1035,393 @@ test('node comparisons change real zoom layers, expand clusters, and resolve ove
   })
 })
 
+for (const [device, options] of [
+  ['desktop', { reducedMotion: 'no-preference' }],
+  ['320px mobile', { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }],
+]) test(`5,000 regional nodes fit, cluster, and remain keyboard-accessible on ${device}`, async (t) => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    if (options.isMobile) {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).press('Enter')
+      await page.getByRole('option', { name: '5,000 regional nodes', exact: true }).tap()
+    } else {
+      await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    }
+
+    const fit = showcase.getByRole('button', { name: 'Fit all nodes', exact: true })
+    async function allFit() {
+      return page.evaluate(async () => {
+        const map = window.overlapMap
+        const features = (await map.getSource('markers').getData()).features
+        const { clientWidth, clientHeight } = map.getCanvas()
+        return features.length === 5000 && features.every(({ geometry }) => {
+          const { x, y } = map.project(geometry.coordinates)
+          return x >= 0 && x <= clientWidth && y >= 0 && y <= clientHeight
+        })
+      })
+    }
+    await page.waitForFunction(async () => {
+      const source = window.overlapMap?.getSource('markers')
+      return source?.getClusterOptions().cluster && (await source.getData()).features.length === 5000
+        && window.overlapMap.isSourceLoaded('markers')
+    })
+    assert.ok(await allFit(), 'The initial viewport contains every fixture node')
+    assert.equal(await showcase.getByRole('button', { name: /Spiderfy|Expand cluster/ }).count(), 0)
+    const visibleNodes = showcase.getByRole('region', { name: 'Visible nodes', exact: true })
+    await visibleNodes.getByText(/5,000 nodes in view/).waitFor()
+
+    const canvas = showcase.getByLabel('5,000 regional nodes fixture map', { exact: true })
+    const cluster = await frameMatching(page, () => {
+      const map = window.overlapMap
+      const { clientWidth, clientHeight } = map.getCanvas()
+      const target = map.queryRenderedFeatures({ layers: ['preview-cluster'] }).map(feature => ({
+        ...map.project(feature.geometry.coordinates), count: feature.properties.point_count,
+      })).find(({ x, y }) => x > 20 && y > 20 && x < clientWidth - 20 && y < clientHeight - 40)
+      if (!target) return false
+      window.regionalClusterStart = { zoom: map.getZoom(), time: performance.now() }
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        window.regionalZoomFrames = new Set()
+        const track = () => window.regionalZoomFrames.add(map.getZoom())
+        map.on('zoom', track)
+        map.once('zoomend', () => map.off('zoom', track))
+      }
+      return target
+    })
+    assert.ok(cluster.count > 1)
+    const position = { x: cluster.x, y: cluster.y }
+    if (options.isMobile) await canvas.tap({ position })
+    else await canvas.click({ position })
+    const clusterMs = await frameMatching(page, () => {
+      const map = window.overlapMap
+      return !map.isMoving() && map.getZoom() > window.regionalClusterStart.zoom && performance.now() - window.regionalClusterStart.time
+    })
+    t.diagnostic(`Cluster expansion observed after ${Math.round(clusterMs)} ms (including input and browser wait)`)
+    if (!options.isMobile) assert.ok(await page.evaluate(() => window.regionalZoomFrames.size > 2), 'Animated expansion renders intermediate zoom levels')
+
+    const finder = showcase.getByRole('region', { name: 'Map node finder' })
+    const search = finder.getByRole('searchbox', { name: 'Find node' })
+    const results = finder.getByRole('list', { name: 'Node search results' })
+    const selection = finder.getByRole('region', { name: 'Selected node' })
+    await search.fill('regional-')
+    assert.equal(await results.getByRole('button').count(), 8)
+    await search.fill('REGIONAL-0036')
+    await search.press('Tab')
+    const target = results.getByRole('button', { name: /Klaipėda 0036/ })
+    assert.ok(await target.evaluate(node => node === document.activeElement))
+    await page.keyboard.press('Enter')
+    await selection.getByText('Klaipėda 0036', { exact: true }).waitFor()
+    await page.waitForFunction(() => {
+      const map = window.overlapMap
+      return !map.isMoving() && map.getZoom() >= 13 && Math.abs(map.getCenter().lng - 21.14) < 0.00001 && map.isSourceLoaded('markers')
+    })
+    await visibleNodes.getByText(/36 nodes in view/).waitFor()
+
+    await canvas.press('Enter')
+    assert.ok(await search.evaluate(node => node === document.activeElement))
+    await finder.getByText(/Search these 36 overlapping nodes/).waitFor()
+    assert.equal(await results.getByRole('button').count(), 8)
+    await search.press('Escape')
+    assert.ok(await canvas.evaluate(node => node === document.activeElement))
+    await canvas.press('Enter')
+    const initiallyDisplayed = await results.getByRole('button').allTextContents()
+    const available = ['0035', '0034', '0033', '0032', '0031', '0030', '0029', '0028', '0027']
+      .find(number => !initiallyDisplayed.some(text => text.includes(`regional-${number}`)))
+    assert.ok(available)
+    await search.fill(`regional-${available}`)
+    await search.press('Tab')
+    await page.keyboard.press('Enter')
+    await selection.getByText(`Klaipėda ${available}`, { exact: true }).waitFor()
+
+    const camera = await page.evaluate(() => window.overlapMap.getCenter().lng)
+    await canvas.press('ArrowRight')
+    await page.waitForFunction(lng => !window.overlapMap.isMoving() && window.overlapMap.getCenter().lng !== lng, camera)
+    await fit.click()
+    assert.ok(await allFit(), 'Fit all nodes restores the regional extent')
+    await visibleNodes.getByText(/5,000 nodes in view/).waitFor()
+
+    const clustering = showcase.getByRole('button', { name: 'Clustering', exact: true })
+    const view = () => page.evaluate(() => {
+      const map = window.overlapMap
+      return { center: map.getCenter().toArray(), zoom: map.getZoom() }
+    })
+    const fittedView = await view()
+    assert.equal(await clustering.getAttribute('aria-pressed'), 'true')
+    if (options.isMobile) await clustering.tap()
+    else await clustering.press('Space')
+    assert.equal(await clustering.getAttribute('aria-pressed'), 'false')
+    await page.waitForFunction(() => {
+      const map = window.overlapMap
+      if (!map.isSourceLoaded('markers') || map.queryRenderedFeatures({ layers: ['preview-cluster'] }).length) return false
+      const nodes = map.queryRenderedFeatures({ layers: ['preview-marker'] })
+      return new Set(nodes.map(node => node.properties.previewId)).size === 5000
+    })
+    assert.deepEqual(await view(), fittedView)
+    assert.ok(await selection.getByText(`Klaipėda ${available}`, { exact: true }).isVisible())
+    await visibleNodes.getByText(/5,000 nodes in view/).waitFor()
+
+    if (options.isMobile) await clustering.tap()
+    else await clustering.press('Space')
+    assert.equal(await clustering.getAttribute('aria-pressed'), 'true')
+    await page.waitForFunction(() => window.overlapMap.queryRenderedFeatures({ layers: ['preview-cluster'] }).length > 0)
+    assert.deepEqual(await view(), fittedView)
+
+    assert.ok(await showcase.evaluate(node => node.scrollWidth <= node.clientWidth))
+    assert.equal(await page.evaluate(() => window.renderedMap), undefined, 'Frame reports are off by default')
+  }, { ...options, diagnostics: false }, exposeOverlapMap)
+})
+
+for (const [device, options] of [
+  ['desktop', {}],
+  ['320px mobile', { viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true }],
+]) test(`visible nodes scroll independently and search only the map viewport on ${device}`, async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    if (options.isMobile) {
+      await showcase.getByRole('combobox', { name: 'Scenario', exact: true }).press('Enter')
+      await page.getByRole('option', { name: '5,000 regional nodes', exact: true }).tap()
+    } else {
+      await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    }
+    const panel = showcase.getByRole('region', { name: 'Visible nodes', exact: true })
+    const search = panel.getByRole('searchbox', { name: 'Search visible nodes', exact: true })
+    await panel.getByText(/5,000 nodes in view/).waitFor()
+    const list = panel.getByRole('listbox', { name: 'Nodes in view' })
+    const heading = panel.getByRole('heading', { name: 'Visible nodes', exact: true })
+    assert.equal(await panel.getByText(/Includes nodes with advertised coordinates/).count(), 0)
+    const [panelBox, headingBox, searchBox, listBox] = await Promise.all(
+      [panel, heading, search, list].map(locator => locator.boundingBox()))
+    const countBox = await panel.getByText('5,000', { exact: true }).boundingBox()
+    assert.ok(countBox.x > headingBox.x + headingBox.width && countBox.y < headingBox.y + headingBox.height,
+      'The count sits beside the title without another status line')
+    assert.ok(panelBox.width <= 400, 'The content stays drawer-width on a wide page')
+    assert.ok(searchBox.height >= 24 && searchBox.height <= 36, 'The search field is compact and still has a usable target')
+    assert.ok(searchBox.y >= headingBox.y + headingBox.height && searchBox.y + searchBox.height <= listBox.y,
+      'The search field sits between the title and scrolling rows')
+    const rows = list.getByRole('option')
+    await rows.first().waitFor()
+    assert.ok((await rows.first().boundingBox()).height <= 50, 'Rows have the reference drawer density')
+    const [nameBox, idBox, roleBox] = await Promise.all(
+      ['strong', 'code', '.ks-map-visible-role'].map(selector => rows.first().locator(selector).boundingBox()))
+    assert.ok(idBox.y > nameBox.y && Math.abs(nameBox.x - idBox.x) < 1 && roleBox.x >= nameBox.x + nameBox.width,
+      'The ID sits below the name and the role has its own column on the right')
+    const initial = await rows.allTextContents()
+    assert.ok(initial.length > 0 && initial.length < 60, 'The initial view does not mount all 5,000 rows')
+
+    const scroller = list
+    await scroller.scrollIntoViewIfNeeded()
+    if (!options.isMobile) await scroller.hover()
+    const searchPosition = await search.boundingBox()
+    if (options.isMobile) await scroller.evaluate(root => { root.scrollTop = 1800 })
+    else await page.mouse.wheel(0, 1800)
+    await page.waitForFunction(root => root.scrollTop > 0, await scroller.elementHandle())
+    await page.waitForFunction(({ root, first }) => root.querySelector('[role="option"]')?.textContent !== first,
+      { root: await list.elementHandle(), first: initial[0] })
+    assert.deepEqual(await search.boundingBox(), searchPosition, 'The search field does not scroll with the rows')
+    assert.ok(await rows.count() < 60, 'Scrolling does not accumulate mounted rows')
+    assert.ok(await scroller.evaluate(root => root.scrollWidth === root.clientWidth))
+
+    await scroller.evaluate(root => { root.scrollTop = root.scrollHeight })
+    const finalNode = list.getByRole('option', { name: /Zakopane 4971/ })
+    await finalNode.waitFor()
+    assert.equal(await finalNode.getAttribute('aria-posinset'), '5000')
+    assert.ok(await rows.count() < 60)
+
+    await list.press('Home')
+    await page.waitForFunction(root => root.scrollTop === 0, await list.elementHandle())
+    await list.press('End')
+    await finalNode.waitFor()
+    assert.equal(await list.getAttribute('aria-activedescendant'), await finalNode.getAttribute('id'))
+    await search.fill('REGIONAL-0036')
+    const inView = list.getByRole('option', { name: /Klaipėda 0036/ })
+    await inView.waitFor()
+    assert.equal(await rows.count(), 1)
+    if (options.isMobile) await inView.tap()
+    else {
+      await search.press('Tab')
+      assert.ok(await list.evaluate(root => root === document.activeElement))
+      await list.press('Enter')
+    }
+    await showcase.getByRole('region', { name: 'Selected node' }).getByText('Klaipėda 0036', { exact: true }).waitFor()
+    await page.waitForFunction(() => {
+      const map = window.overlapMap
+      return !map.isMoving() && map.getZoom() >= 13 && Math.abs(map.getCenter().lng - 21.14) < 0.00001
+    })
+
+    await search.fill('regional-0037')
+    await panel.getByText(/no .*match/i).waitFor()
+    assert.equal(await rows.count(), 0)
+    await search.fill('')
+    await panel.getByText(/36 nodes in view/).waitFor()
+    await list.focus()
+    await page.evaluate(() => window.overlapMap.jumpTo({ center: [-35, 35], zoom: 10 }))
+    await panel.getByText('No nodes in view.', { exact: true }).waitFor()
+    assert.ok(await panel.evaluate(root => root.contains(document.activeElement)), 'Focus stays in the panel when results leave the view')
+    assert.ok(await showcase.evaluate(root => root.scrollWidth <= root.clientWidth))
+  }, { ...options, diagnostics: false }, exposeOverlapMap)
+})
+
+test('regional simulated packets move concurrently without moving the camera or selection', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    const traffic = showcase.getByRole('button', { name: 'Simulated traffic', exact: true })
+    const selection = showcase.getByRole('region', { name: 'Selected node' })
+    const camera = () => page.evaluate(() => [window.overlapMap.getCenter().toArray(), window.overlapMap.getZoom()])
+    await page.waitForFunction(() => window.overlapMap.getSource('markers').getClusterOptions().cluster && window.overlapMap.isSourceLoaded('markers'))
+    const view = await camera()
+    assert.equal(await traffic.getAttribute('aria-pressed'), 'false')
+    await traffic.press('Space')
+    assert.equal(await traffic.getAttribute('aria-pressed'), 'true')
+    const concurrent = await frameMatching(page, () => {
+      const heads = window.overlapMap.queryRenderedFeatures({ layers: ['preview-flow-head'] })
+      const routes = [...new Set(heads.map(head => head.properties.route))]
+      return routes.length >= 3 && routes
+    })
+    await page.waitForFunction(() => window.overlapMap.queryRenderedFeatures({ layers: ['preview-flow-arrival'] }).length > 0)
+    await page.waitForFunction(previous => {
+      const heads = window.overlapMap.queryRenderedFeatures({ layers: ['preview-flow-head'] })
+      const routes = heads.map(head => head.properties.route)
+      return routes.some(id => previous.includes(id)) && routes.some(id => !previous.includes(id))
+    }, concurrent)
+    assert.deepEqual(await camera(), view)
+    assert.ok(await selection.getByText('No node selected.', { exact: true }).isVisible())
+    await traffic.press('Space')
+    assert.equal(await traffic.getAttribute('aria-pressed'), 'false')
+    await page.waitForFunction(async () => (await window.overlapMap.getSource('preview-flow').getData()).features.length === 0)
+  }, { diagnostics: false, reducedMotion: 'no-preference' }, exposeOverlapMap)
+})
+
+test('regional simulated traffic refreshes static routes with reduced motion and clears on scenario change', async (t) => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    await showcase.getByText('Routes shown without animation.', { exact: true }).waitFor()
+    const trafficButton = showcase.getByRole('button', { name: 'Simulated traffic', exact: true })
+    await page.waitForFunction(button => !button.disabled, await trafficButton.elementHandle())
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const entries = await agent.query({ text: 'Simulated traffic' })
+      const traffic = entries.find(entry => entry.label === 'Simulated traffic')
+      if (!traffic) return null
+      if (!traffic.actions.includes('setPressed')) return { ok: false, error: { message: traffic.actions.join(', ') } }
+      return agent.act({ steps: [{ ref: traffic.ref, action: 'setPressed', args: [true] }] })
+    })
+    assert.equal(result?.ok, true, result?.error?.message ?? 'Simulated traffic toggle not discovered')
+    assert.equal(await trafficButton.getAttribute('aria-pressed'), 'true')
+    const first = await frameMatching(page, async () => {
+      const map = window.overlapMap
+      const { features } = await map.getSource('preview-flow').getData()
+      if (!features.length) return false
+      const { features: nodes } = await map.getSource('markers').getData()
+      const positions = new Set(nodes.map(node => String(node.geometry.coordinates)))
+      const routes = Object.groupBy(features.filter(feature => feature.properties.kind === 'trail'), feature => feature.properties.route)
+      const stops = Object.values(routes).map(trails =>
+        [trails[0].geometry.coordinates[0], ...trails.map(trail => trail.geometry.coordinates[1])].map(String))
+      return { stops, ids: Object.keys(routes), atFixtureNodes: stops.flat().every(stop => positions.has(stop)), kinds: [...new Set(features.map(feature => feature.properties.kind))].sort() }
+    })
+    assert.deepEqual(first.kinds, ['arrival', 'trail'])
+    assert.ok(first.atFixtureNodes)
+    assert.equal(first.stops.length, 2)
+    assert.ok(first.stops.every(route => route.length >= 2 && new Set(route).size === route.length))
+    await page.waitForFunction(async (previous) => {
+      const { features } = await window.overlapMap.getSource('preview-flow').getData()
+      const routes = [...new Set(features.filter(feature => feature.properties.kind === 'trail').map(trail => trail.properties.route))]
+      return routes.length === 2 && routes.filter(id => previous.includes(id)).length === 1
+        && !features.some(feature => feature.properties.kind === 'head')
+    }, first.ids)
+    await showcase.getByRole('button', { name: 'Distant dots', exact: true }).click()
+    await page.waitForFunction(async () => (await window.overlapMap.getSource('preview-flow').getData()).features.length === 0)
+    await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    assert.equal(await showcase.getByRole('button', { name: 'Simulated traffic' }).getAttribute('aria-pressed'), 'false')
+  }, {}, async page => {
+    if (await prepareMapAgent(page, t) === false) return false
+    await exposeOverlapMap(page)
+  })
+})
+
+test('the UI SDK agent can find and use the compact visible-node search', async (t) => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: '5,000 regional nodes', exact: true }).click()
+    const panel = showcase.getByRole('region', { name: 'Visible nodes', exact: true })
+    await panel.getByRole('listbox', { name: 'Nodes in view' }).waitFor()
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const entries = await agent.query({ text: 'Search visible nodes' })
+      const search = entries.find(entry => entry.label === 'Search visible nodes')
+      return search && agent.act({ steps: [{ ref: search.ref, action: 'setValue', args: ['regional-0036'] }] })
+    })
+    assert.equal(result?.ok, true, result?.error?.message ?? 'Visible-node search not discovered')
+    assert.equal(await panel.getByRole('searchbox', { name: 'Search visible nodes' }).inputValue(), 'regional-0036')
+    await panel.getByRole('option', { name: /Klaipėda 0036/ }).waitFor()
+    assert.equal(await panel.getByRole('option').count(), 1)
+  }, {}, page => prepareMapAgent(page, t))
+})
+
+test('overlapping map badges hide the glyphs and outlines underneath them in both themes', async () => {
+  await withMap(async (page, showcase) => {
+    await showcase.getByRole('button', { name: 'Node states', exact: true }).click()
+    await showcase.getByRole('button', { name: 'Every role & fallback', exact: true }).click()
+    await frameMatching(page, () => window.renderedMap?.sceneId === 'role-specimens' && window.renderedMap.roleIds.length === 7)
+
+    for (const theme of ['Light', 'Dark']) {
+      await showcase.getByRole('radio', { name: theme, exact: true }).click()
+      await showcase.locator(`.map-preview[data-map-theme="${theme.toLowerCase()}"][data-basemap-state="ready"]`).waitFor()
+      const matches = await page.evaluate(async () => {
+        const map = window.overlapMap
+        const source = map.getSource('markers')
+        const original = await source.getData()
+        const [first, second] = original.features
+        const canvas = map.getCanvas()
+        const center = { x: Math.floor(canvas.clientWidth / 2), y: Math.floor(canvas.clientHeight / 2) }
+        map.jumpTo({ zoom: 10.5 })
+        const at = (feature, x) => ({ ...feature, geometry: { type: 'Point', coordinates: map.unproject([center.x + x, center.y]).toArray() } })
+        const left = at(first, 0), right = at(second, 8), coincident = at(second, 0)
+        const image = document.createElement('canvas')
+        image.width = 40
+        image.height = 24
+        const ctx = image.getContext('2d', { willReadFrequently: true })
+        async function draw(...features) {
+          await source.setData({ type: 'FeatureCollection', features })
+          await map.once('idle')
+          return new Promise(resolve => {
+            map.once('render', () => {
+              const scale = canvas.width / canvas.clientWidth
+              ctx.clearRect(0, 0, 40, 24)
+              ctx.drawImage(canvas, (center.x - 12) * scale, (center.y - 12) * scale, 40 * scale, 24 * scale, 0, 0, 40, 24)
+              resolve(ctx.getImageData(0, 0, 40, 24).data)
+            })
+            map.triggerRepaint()
+          })
+        }
+        function badgeInteriorMatches(actual, expected, x) {
+          for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+            if (dx * dx + dy * dy > 49) continue
+            const pixel = 4 * ((12 + dy) * 40 + 12 + x + dx)
+            for (let channel = 0; channel < 4; channel++) if (actual[pixel + channel] !== expected[pixel + channel]) return false
+          }
+          return true
+        }
+
+        const leftAlone = await draw(left)
+        const coincidentAlone = await draw(coincident)
+        const rightAlone = await draw(right)
+        const exact = await draw(left, coincident)
+        const partial = await draw(left, right)
+        const bothDrawn = new Set(map.queryRenderedFeatures({ layers: ['preview-role'] }).map(({ properties }) => properties.previewId)).size === 2
+        await source.setData(original)
+        return {
+          distinctArtwork: !badgeInteriorMatches(leftAlone, coincidentAlone, 0),
+          exact: badgeInteriorMatches(exact, leftAlone, 0) || badgeInteriorMatches(exact, coincidentAlone, 0),
+          partial: badgeInteriorMatches(partial, leftAlone, 0) || badgeInteriorMatches(partial, rightAlone, 8),
+          bothDrawn,
+        }
+      })
+      assert.deepEqual(matches, { distinctArtwork: true, exact: true, partial: true, bothDrawn: true }, theme)
+    }
+  }, {}, exposeOverlapMap)
+})
+
 test('a failed WebGL initialization leaves evidence available and map retry restores it', async () => {
   await withMap(async (page, showcase) => {
     const retry = showcase.getByRole('button', { name: 'Retry map', exact: true })
@@ -1265,7 +1653,7 @@ async function prepareMapAgent(page, t) {
       t.skip('The agent harness is a Vite development module')
       return false
     }
-    await page.route(url, async route => {
+  await page.route(diagnosticsUrl, async route => {
       const response = await route.fetch()
       const html = await response.text()
       const body = html.replace(/src="\/src\/main\.tsx(?:\?[^"]*)?"/, 'src="/tests/kitchen-sink-agent.mjs"')

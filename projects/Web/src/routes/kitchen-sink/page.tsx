@@ -18,7 +18,7 @@ import { PacketPathSpecimens } from './packet-path-specimens'
 import { PacketTrafficSpecimens } from './packet-traffic-specimens'
 import { PacketTypeSpecimens } from './packet-type-specimens'
 import { SearchableMultiSelectSpecimen } from './searchable-multi-select-specimen'
-import { ChannelKindSpecimens, MeshBrandSpecimens } from './static-specimens'
+import { ChannelKindSpecimens, LiveStatusSpecimens, MeshBrandSpecimens } from './static-specimens'
 import './kitchen-sink.css'
 import './map-specimens.css'
 
@@ -267,6 +267,7 @@ export function KitchenSinkPage() {
             <p>Explore the icons, node identities, and packet details Pulsas uses to describe a mesh network. These examples don’t show live network activity.</p>
           </div>
         </header>
+        <LiveStatusSpecimens />
         <ChannelKindSpecimens />
         <NodeIdentityPreview identity={identity} onRole={setRole} onObserver={setObserver} onWarning={setWarning} />
         <NodeIdentityContext identity={identity} />

@@ -31,11 +31,12 @@ const palettes = {
   dark: { strong: '#92e4bc', weak: '#ffca82', flow: '#ff9f78', ink: '#edf4ee', casing: '#17211f', gap: '#2b2318' },
 }
 const white = '#fff'
-const roleImageSize = 54
+const rolePixelRatio = 3
+const roleGlyphSize = 18
+const roleBadgeSize = 32
 const nameSize = 12
-const roleGlyphLayout: SymbolLayerSpecification['layout'] = {
-  'icon-image': ['get', 'roleImage'],
-  'icon-size': ['match', ['get', 'roleImage'], ['node-role-CLIENT', 'node-role-ROOM_SERVER'], 0.8, 1],
+const roleBadgeLayout: SymbolLayerSpecification['layout'] = {
+  'symbol-z-order': 'source',
   'icon-allow-overlap': true, 'icon-ignore-placement': true,
 }
 const isWeak = ['==', ['get', 'confidence'], 'weak'] satisfies FilterSpecification
@@ -45,6 +46,15 @@ const isEvidence = ['has', 'confidence'] satisfies FilterSpecification
 const isCandidate = ['all', isNode, isEvidence] satisfies FilterSpecification
 const isOrdinaryNode = ['all', isNode, ['!', isEvidence]] satisfies FilterSpecification
 const isAmbiguous = ['==', ['get', 'ambiguous'], true] satisfies FilterSpecification
+
+function roleBadgeImage(theme: MapPreviewTheme, includeConfidence: boolean): ExpressionSpecification {
+  const role = ['coalesce', ['get', 'roleImage'], roleImageId('NONE')] satisfies ExpressionSpecification
+  const suffix = theme === 'dark' ? '-dark' : ''
+  return includeConfidence
+    ? ['concat', role, ['case', isEvidence, ['case', isWeak, '-weak', '-strong'], ''], suffix]
+    : ['concat', role, suffix]
+}
+
 const nameLayout: SymbolLayerSpecification['layout'] = {
   'text-field': ['get', 'name'], 'text-font': ['sans-serif'], 'text-size': nameSize,
   'text-anchor': 'top', 'text-max-width': 14, 'text-padding': 4,
@@ -76,13 +86,6 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
   const roleInk = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], strongColor] satisfies ExpressionSpecification
   const roleFill = ['coalesce', ['get', theme === 'dark' ? 'roleDarkFill' : 'roleFill'], strongColor] satisfies ExpressionSpecification
   const roleEdge = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], white] satisfies ExpressionSpecification
-  const compactRoleFace = {
-    'circle-radius': 9, 'circle-color': roleFill,
-    'circle-stroke-color': roleEdge, 'circle-stroke-width': 1,
-  }
-  const themedRoleGlyphLayout: SymbolLayerSpecification['layout'] = {
-    ...roleGlyphLayout, 'icon-image': theme === 'dark' ? ['concat', ['get', 'roleImage'], '-dark'] : ['get', 'roleImage'],
-  }
   const textPaint = { 'text-color': ink, 'text-halo-color': casing, 'text-halo-width': 1.7 }
   const nameOpacity = ['case', ['boolean', ['feature-state', 'nameOutsideViewport'], false], 0, 1] satisfies ExpressionSpecification
   const confidenceInk = ['case', isWeak, weakColor, strongColor] as const
@@ -114,8 +117,8 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
       { id: 'preview-cluster-count', source: 'markers', type: 'symbol', filter: ['has', 'point_count'], layout: {
         'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['sans-serif'], 'text-size': 13, 'text-allow-overlap': true, 'text-ignore-placement': true,
       }, paint: { 'text-color': theme === 'dark' ? casing : white } },
-      { id: 'preview-confidence-ring', source: 'markers', type: 'circle', filter: isCandidate, paint: {
-        'circle-radius': ['step', ['zoom'], 10, roleZoom, 12.5], 'circle-color': casing,
+      { id: 'preview-confidence-ring', source: 'markers', type: 'circle', maxzoom: roleZoom, filter: isCandidate, paint: {
+        'circle-radius': 10, 'circle-color': casing,
         'circle-stroke-color': [...confidenceInk], 'circle-stroke-width': 2.5,
       } },
       // Keep generous hit areas in the role band, where a separate layer draws the smaller face.
@@ -126,8 +129,8 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
         'circle-stroke-width': ['case', isEvidence, 0, 2],
         'circle-opacity': ['step', ['zoom'], 1, roleZoom, 0], 'circle-stroke-opacity': ['step', ['zoom'], 1, roleZoom, 0],
       } },
-      { id: 'preview-role-face', source: 'markers', type: 'circle', minzoom: roleZoom, filter: isNode, paint: compactRoleFace },
-      { id: roleLayer, source: 'markers', type: 'symbol', minzoom: roleZoom, filter: ['all', isNode, ['has', 'roleImage']], layout: themedRoleGlyphLayout },
+      { id: roleLayer, source: 'markers', type: 'symbol', minzoom: roleZoom, filter: isNode,
+        layout: { ...roleBadgeLayout, 'icon-image': roleBadgeImage(theme, true) } },
       { id: labelLayer, source: 'markers', type: 'symbol', minzoom: labelZoom, filter: isOrdinaryNode, layout: nameLayout, paint: { ...textPaint, 'text-opacity': nameOpacity } },
       { id: evidenceLabelLayer, source: 'markers', type: 'symbol', filter: isCandidate, layout: evidenceNameLayout, paint: { ...textPaint, 'text-opacity': nameOpacity } },
       { id: hopLayer, source: 'markers', type: 'symbol', filter: isCandidate, layout: hopLayout, paint: { ...textPaint, 'text-color': [...confidenceInk] } },
@@ -168,8 +171,8 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
       { id: 'preview-raised-ordinary-ring', source: chosenSource, type: 'circle', filter: ['!', isEvidence], paint: {
         'circle-radius': 12.5, 'circle-color': casing, 'circle-stroke-color': roleEdge, 'circle-stroke-width': 2,
       } },
-      { id: 'preview-raised-role-face', source: chosenSource, type: 'circle', paint: compactRoleFace },
-      { id: 'preview-raised-role', source: chosenSource, type: 'symbol', layout: themedRoleGlyphLayout },
+      { id: 'preview-raised-role', source: chosenSource, type: 'symbol',
+        layout: { ...roleBadgeLayout, 'icon-image': roleBadgeImage(theme, false) } },
       { id: raisedLabelLayer, source: chosenSource, type: 'symbol', layout: {
         // MapLibre infers weight from the first family; extending the generic sans-serif name makes Canvas reject its font string.
         ...nameLayout, 'text-font': ['Arial Semibold', 'sans-serif'],
@@ -201,9 +204,8 @@ export function applyMapPreviewTheme(map: MapLibre, theme: MapPreviewTheme) {
   map.setLayoutProperty(gapLayer, 'icon-image', `schematic-box-${theme}`)
   map.setLayoutProperty('preview-flow-schematic', 'icon-image', `schematic-box-${theme}`)
   map.setLayoutProperty(raisedLabelLayer, 'icon-image', `selected-nameplate-${theme}`)
-  for (const id of [roleLayer, 'preview-raised-role']) {
-    map.setLayoutProperty(id, 'icon-image', theme === 'dark' ? ['concat', ['get', 'roleImage'], '-dark'] : ['get', 'roleImage'])
-  }
+  map.setLayoutProperty(roleLayer, 'icon-image', roleBadgeImage(theme, true))
+  map.setLayoutProperty('preview-raised-role', 'icon-image', roleBadgeImage(theme, false))
 }
 
 export function excludeRaisedLabels(map: MapLibre, selectedId: string | null, overlapIds: readonly string[] = [], expandedIds: readonly string[] = []) {
@@ -235,8 +237,8 @@ export async function loadPreviewImages(artwork: HTMLDivElement) {
     const roleDarkInk = style.getPropertyValue('--ks-tone-dark-ink').trim()
     const roleDarkFill = style.getPropertyValue('--ks-tone-dark-fill').trim()
     const svg = (element.firstElementChild as SVGSVGElement).cloneNode(true) as SVGSVGElement
-    svg.setAttribute('width', String(roleImageSize))
-    svg.setAttribute('height', String(roleImageSize))
+    svg.setAttribute('width', String(roleGlyphSize * rolePixelRatio))
+    svg.setAttribute('height', String(roleGlyphSize * rolePixelRatio))
     const variants = await Promise.all([roleInk, roleDarkInk].map(async (color) => {
       const variant = svg.cloneNode(true) as SVGSVGElement
       variant.setAttribute('color', color)
@@ -248,14 +250,40 @@ export async function loadPreviewImages(artwork: HTMLDivElement) {
     return { role, variants, colors: { roleInk, roleFill, roleDarkInk, roleDarkFill } }
   }))
   function install(map: MapLibre) {
-    for (const { role, variants } of images) {
-      map.addImage(roleImageId(role), variants[0], { pixelRatio: 3 })
-      map.addImage(`${roleImageId(role)}-dark`, variants[1], { pixelRatio: 3 })
-    }
     const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')!
+    canvas.width = canvas.height = roleBadgeSize * rolePixelRatio
+    context.scale(rolePixelRatio, rolePixelRatio)
+    const center = roleBadgeSize / 2
+    function disk(radius: number, color: string) {
+      context.fillStyle = color
+      context.beginPath()
+      context.arc(center, center, radius, 0, 2 * Math.PI)
+      context.fill()
+    }
+    for (const { role, variants, colors } of images) {
+      const glyphSize = roleGlyphSize * (role === 'CLIENT' || role === 'ROOM_SERVER' ? 0.8 : 1)
+      const glyphStart = center - glyphSize / 2
+      for (const theme of ['light', 'dark'] as const) {
+        const dark = theme === 'dark'
+        const palette = palettes[theme]
+        for (const confidence of ['', 'strong', 'weak'] as const) {
+          context.clearRect(0, 0, roleBadgeSize, roleBadgeSize)
+          // Composite the whole badge so a foreground face and ring mask whatever is below them.
+          if (confidence) {
+            disk(15, palette[confidence])
+            disk(12.5, palette.casing)
+          }
+          disk(10, dark ? colors.roleDarkInk : colors.roleInk)
+          disk(9, dark ? colors.roleDarkFill : colors.roleFill)
+          context.drawImage(variants[dark ? 1 : 0], glyphStart, glyphStart, glyphSize, glyphSize)
+          const id = `${roleImageId(role)}${confidence ? `-${confidence}` : ''}${dark ? '-dark' : ''}`
+          map.addImage(id, context.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: rolePixelRatio })
+        }
+      }
+    }
     canvas.width = 126
     canvas.height = 52
-    const context = canvas.getContext('2d')!
     context.lineWidth = 3
     context.setLineDash([6, 4])
     context.beginPath()

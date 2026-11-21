@@ -80,6 +80,8 @@ test('keyboard selects a role, dismisses the picker, and changes both modifiers'
 
     assert.match(await status.innerText(), /Room server · Observer/)
     await page.keyboard.press('Tab')
+    assert.ok(await page.getByRole('button', { name: 'Pause badge updates', exact: true }).evaluate((node) => node === document.activeElement))
+    await page.keyboard.press('Tab')
     assert.ok(await role.evaluate((node) => node === document.activeElement))
     await page.keyboard.press('ArrowDown')
     await listbox.waitFor()
@@ -127,6 +129,69 @@ test('the Client role uses the legacy phone-and-message icon in avatars, badges,
     await option.waitFor()
     assert.deepEqual(await option.locator('svg').first().locator('path').evaluateAll((paths) => paths.map((path) => path.getAttribute('d'))), legacyPaths)
   })
+})
+
+test('the live status badge counts elapsed stale time in the largest whole unit', async () => {
+  const start = new Date('2026-11-21T12:00:00Z')
+  await withWorkbench({}, async (page) => {
+    const specimen = page.getByRole('region', { name: 'Live status badge', exact: true })
+    const surfaces = await specimen.getByRole('figure').all()
+    assert.equal(surfaces.length, 2)
+    for (const surface of surfaces) {
+      assert.ok(await surface.getByText('Live', { exact: true }).isVisible())
+      assert.match(await surface.ariaSnapshot(), /Stale/)
+    }
+    let elapsed = 0
+    for (const [seconds, label] of [
+      [0, '0s'], [1, '1s'], [59, '59s'], [60, '1m'], [119, '1m'],
+      [3599, '59m'], [3600, '1h'], [86399, '23h'], [86400, '1d'], [172800, '2d'],
+    ]) {
+      if (seconds > elapsed) await page.clock.fastForward((seconds - elapsed) * 1000)
+      elapsed = seconds
+      for (const surface of surfaces) {
+        const timer = surface.getByRole('timer').filter({ hasText: new RegExp(`^${label}$`) })
+        await timer.waitFor({ timeout: 3000 })
+        assert.equal(await timer.getAttribute('aria-live'), 'off')
+      }
+    }
+
+    const pause = specimen.getByRole('button', { name: 'Pause badge updates', exact: true })
+    const resume = specimen.getByRole('button', { name: 'Resume badge updates', exact: true })
+    await pause.press('Space')
+    await resume.waitFor({ timeout: 3000 })
+    await page.clock.fastForward(86_400_000)
+    assert.deepEqual(await specimen.getByRole('timer').allTextContents(), ['2d', '2d'])
+    await resume.press('Enter')
+    await specimen.getByRole('timer', { name: 'for 3 days' }).last().waitFor({ timeout: 3000 })
+    assert.deepEqual(await specimen.getByRole('timer').allTextContents(), ['3d', '3d'])
+  }, async (page) => {
+    await page.clock.install({ time: new Date(start.getTime() - 60_000) })
+    await page.clock.pauseAt(start)
+  })
+})
+
+test('only the live status badge pulses, and it respects reduced motion', async () => {
+  await withWorkbench({ viewport: { width: 320, height: 780 } }, async (page) => {
+    const specimen = page.getByRole('region', { name: 'Live status badge', exact: true })
+    const live = specimen.locator('.ks-live-status-badge[data-state="live"]')
+    const stale = specimen.locator('.ks-live-status-badge[data-state="stale"]')
+    const animations = (badges) => badges.evaluateAll((nodes) =>
+      nodes.flatMap((node) => node.getAnimations({ subtree: true }).map((animation) => animation.effect?.getTiming().iterations)))
+    assert.deepEqual(await animations(live), [])
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    assert.deepEqual(await animations(live), [Infinity, Infinity])
+    assert.deepEqual(await animations(stale), [])
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [{ ref: 'Pause badge updates', action: 'press' }] })
+    })
+    assert.equal(result.ok, true, result.error?.message)
+    await specimen.getByRole('button', { name: 'Resume badge updates', exact: true }).waitFor({ timeout: 3000 })
+    assert.deepEqual(await live.evaluateAll((badges) => badges.flatMap((badge) =>
+      badge.getAnimations({ subtree: true }).map((animation) => animation.playState))), ['paused', 'paused'])
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+  }, loadWithAgent)
 })
 
 test('320px workbench keeps the previews and new specimens within the viewport', async () => {
