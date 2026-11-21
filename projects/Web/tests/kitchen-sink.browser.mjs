@@ -44,7 +44,7 @@ async function loadWithAgent(page) {
     const response = await route.fetch()
     const html = await response.text()
     // Install the observer before the real app mounts its SDK controls.
-    const body = html.replace('src="/src/main.tsx"', 'src="/tests/kitchen-sink-agent.mjs"')
+    const body = html.replace(/src="\/src\/main\.tsx(?:\?[^"]*)?"/, 'src="/tests/kitchen-sink-agent.mjs"')
     assert.notEqual(body, html, 'Expected the Vite HTML to load /src/main.tsx')
     await route.fulfill({ response, body })
   })
