@@ -54,6 +54,19 @@ async function chooseAppearance(page, label) {
   await page.getByRole('option', { name: label, exact: true }).click()
 }
 
+function contrastRatio(first, second) {
+  const luminance = color => {
+    const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
+      const channel = value / 255
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    })
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+  }
+  const a = luminance(first)
+  const b = luminance(second)
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+}
+
 test('system appearance follows OS changes while explicit choices persist and synchronize between tabs', async () => {
   await withAppearance({ colorScheme: 'dark', viewport: { width: 1440, height: 900 } }, async context => {
     const page = await openWorkbench(context)
@@ -112,33 +125,37 @@ test('appearance remains usable when persistent storage is blocked', async () =>
 })
 
 test('keyboard appearance selection fits narrow screens and preserves explicit light and dark specimens', async () => {
-  await withAppearance({ colorScheme: 'light', viewport: { width: 320, height: 844 } }, async context => {
-    const page = await openWorkbench(context)
-    const appearance = page.getByRole('combobox', { name: 'Appearance', exact: true })
-    await page.getByRole('checkbox', { name: 'Warning', exact: true }).click()
-    assert.match(await page.getByRole('status', { name: 'Node identity preview' }).innerText(), /Warning/)
-    const sample = page.getByRole('region', { name: 'Live status badge', exact: true })
-    const sampleColors = () => sample.locator('[data-theme]').evaluateAll(nodes => nodes.map(node => ({
-      theme: node.dataset.theme,
-      background: getComputedStyle(node).backgroundColor,
-      badges: [...node.querySelectorAll('[data-tone]')].map(badge => ({ fill: getComputedStyle(badge).backgroundColor, ink: getComputedStyle(badge).color })),
-    })))
-    const before = await sampleColors()
-    await appearance.focus()
-    await appearance.press('ArrowDown')
-    await page.getByRole('listbox').waitFor()
-    const bounds = await page.getByRole('listbox').boundingBox()
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320)
-    await page.keyboard.press('End')
-    await page.keyboard.press('Enter')
-    await assertTheme(page, 'dark', 'dark')
-    assert.ok(await appearance.evaluate(node => node === document.activeElement))
-    assert.equal(await page.getByRole('checkbox', { name: 'Warning', exact: true }).getAttribute('aria-checked'), 'true')
-    assert.deepEqual(await sampleColors(), before)
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
-    const control = await appearance.boundingBox()
-    assert.ok(control.width >= 44 && control.height >= 44)
-  })
+  for (const hasTouch of [false, true]) {
+    await withAppearance({ colorScheme: 'light', viewport: { width: 320, height: 844 }, isMobile: hasTouch, hasTouch }, async context => {
+      const page = await openWorkbench(context)
+      const appearance = page.getByRole('combobox', { name: 'Appearance', exact: true })
+      await page.getByRole('checkbox', { name: 'Warning', exact: true }).click()
+      assert.match(await page.getByRole('status', { name: 'Node identity preview' }).innerText(), /Warning/)
+      const sample = page.getByRole('region', { name: 'Live status badge', exact: true })
+      const sampleColors = () => sample.locator('[data-theme]').evaluateAll(nodes => nodes.map(node => ({
+        theme: node.dataset.theme,
+        background: getComputedStyle(node).backgroundColor,
+        badges: [...node.querySelectorAll('[data-tone]')].map(badge => ({ fill: getComputedStyle(badge).backgroundColor, ink: getComputedStyle(badge).color })),
+      })))
+      const before = await sampleColors()
+      await appearance.focus()
+      await appearance.press('ArrowDown')
+      await page.getByRole('listbox').waitFor()
+      const bounds = await page.getByRole('listbox').boundingBox()
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320)
+      await page.keyboard.press('End')
+      await page.keyboard.press('Enter')
+      await assertTheme(page, 'dark', 'dark')
+      assert.ok(await appearance.evaluate(node => node === document.activeElement))
+      assert.equal(await page.getByRole('checkbox', { name: 'Warning', exact: true }).getAttribute('aria-checked'), 'true')
+      assert.deepEqual(await sampleColors(), before)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+      const control = await appearance.boundingBox()
+      assert.equal(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), hasTouch)
+      const minimumSize = hasTouch ? 44 : 32
+      assert.ok(control.width >= minimumSize && control.height >= minimumSize, `${hasTouch ? 'touch' : 'fine-pointer'} appearance target`)
+    })
+  }
 })
 
 test('workbench text, controls, and focus tokens meet contrast targets in both themes', async () => {
@@ -146,7 +163,7 @@ test('workbench text, controls, and focus tokens meet contrast targets in both t
     const page = await openWorkbench(context)
     for (const theme of ['Light', 'Dark']) {
       await chooseAppearance(page, theme)
-    const tokens = await page.getByRole('main').evaluate(node => {
+      const tokens = await page.getByRole('main').evaluate(node => {
         const names = ['--ks-ground', '--ks-paper', '--ks-ink', '--ks-muted', '--ks-control-edge', '--ks-accent', '--ks-accent-wash', '--ks-focus']
         const probe = document.createElement('span')
         node.append(probe)
@@ -157,18 +174,7 @@ test('workbench text, controls, and focus tokens meet contrast targets in both t
         probe.remove()
         return colors
       })
-      const luminance = color => {
-        const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
-          const channel = value / 255
-          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-        })
-        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
-      }
-      const ratio = (a, b) => {
-        const first = luminance(tokens[a])
-        const second = luminance(tokens[b])
-        return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05)
-      }
+      const ratio = (a, b) => contrastRatio(tokens[a], tokens[b])
       for (const background of ['--ks-ground', '--ks-paper']) {
         for (const foreground of ['--ks-ink', '--ks-muted', '--ks-accent']) {
           assert.ok(ratio(foreground, background) >= 4.5, `${theme}: ${foreground} on ${background} needs 4.5:1`)
@@ -193,6 +199,31 @@ test('SDK agents can discover and change the appearance preference', async () =>
     })
     assert.equal(result.ok, true, result.error?.message)
     await assertTheme(page, 'dark', 'dark')
+  })
+})
+
+test('neutral labels stay neutral and readable without removing semantic category colors', async () => {
+  await withAppearance({ viewport: { width: 1440, height: 900 } }, async context => {
+    const page = await openWorkbench(context)
+    for (const theme of ['Light', 'Dark']) {
+      await chooseAppearance(page, theme)
+      const colors = await page.locator('.ks-badge[data-tone="neutral"]').first().evaluate(node => {
+        const style = getComputedStyle(node)
+        return { fill: style.backgroundColor, ink: style.color }
+      })
+      for (const color of Object.values(colors)) {
+        const [r, g, b] = color.match(/[\d.]+/g).slice(0, 3).map(Number)
+        assert.ok(Math.max(r, g, b) - Math.min(r, g, b) <= 16)
+        assert.ok(b >= g && g >= r, `${theme}: neutral labels must not have a green cast`)
+      }
+      assert.ok(contrastRatio(colors.ink, colors.fill) >= 4.5, `${theme}: neutral label text contrast`)
+      const semantic = await page.locator('.ks-badge[data-tone="green"]').first().evaluate(node => {
+        const style = getComputedStyle(node)
+        return { fill: style.backgroundColor, ink: style.color }
+      })
+      assert.notDeepEqual(semantic, colors, 'green categories remain distinguishable from neutral labels')
+      assert.ok(contrastRatio(semantic.ink, semantic.fill) >= 4.5, `${theme}: semantic label text contrast`)
+    }
   })
 })
 
@@ -245,5 +276,53 @@ test('texture stays on environmental surfaces and is disabled for forced colors 
     images = await backgrounds()
     assert.equal(images['.app-shell'], 'none')
     assert.equal(images['.ks-header'], 'none')
+  })
+})
+
+test('dark action fills, inputs, and focus use readable roles alongside crisp white light surfaces', async () => {
+  await withAppearance({ colorScheme: 'dark', viewport: { width: 1440, height: 900 } }, async context => {
+    const page = await openWorkbench(context)
+    const colors = locator => locator.evaluate(node => {
+      const style = getComputedStyle(node)
+      return { fill: style.backgroundColor, text: style.color, edge: style.borderTopColor, focus: style.outlineColor }
+    })
+    const shell = await colors(page.locator('.app-shell'))
+    const chrome = await colors(page.locator('.app-header'))
+    const workspace = await colors(page.locator('.ks-workspace').first())
+    for (const surface of [shell.fill, chrome.fill, workspace.fill]) {
+      const channels = surface.match(/\d+/g).slice(0, 3)
+      assert.equal(new Set(channels).size, 1, 'dark surfaces use neutral charcoal')
+    }
+    assert.notEqual(chrome.fill, workspace.fill, 'chrome and working surfaces have distinct roles')
+    const warning = page.getByRole('checkbox', { name: 'Warning', exact: true })
+    await warning.click()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    assert.ok(await warning.evaluate(node => node === document.activeElement))
+    const checked = await colors(warning)
+    assert.ok(contrastRatio(checked.text, checked.fill) >= 4.5, 'checked indicator contrast')
+    assert.ok(contrastRatio(checked.focus, checked.fill) >= 3, 'focus against checked fill')
+
+    const traffic = page.getByRole('region', { name: 'Packet traffic', exact: true })
+    await traffic.getByRole('button', { name: 'Edit arrival time', exact: true }).click()
+    const input = traffic.getByLabel('From', { exact: true })
+    await input.focus()
+    const field = await colors(input)
+    assert.ok(contrastRatio(field.text, field.fill) >= 4.5, 'input text contrast')
+    assert.ok(contrastRatio(field.edge, field.fill) >= 3, 'input boundary contrast')
+    assert.ok(contrastRatio(field.focus, field.fill) >= 3, 'input focus contrast')
+    const action = await colors(traffic.getByRole('button', { name: 'Apply range', exact: true }))
+    assert.ok(contrastRatio(action.text, action.fill) >= 4.5, 'filled action text contrast')
+    assert.notEqual(action.fill, checked.focus, 'action and focus have distinct roles')
+    await page.keyboard.press('Escape')
+
+    await chooseAppearance(page, 'Light')
+    assert.equal((await colors(page.locator('.ks-workspace').first())).fill, 'rgb(255, 255, 255)')
+    for (const locator of [page.locator('.app-shell'), page.locator('.app-header')]) {
+      const channels = (await colors(locator)).fill.match(/\d+/g).slice(0, 3).map(Number)
+      assert.ok(Math.min(...channels) >= 240, 'light framing stays near white')
+      assert.ok(Math.max(...channels) - Math.min(...channels) <= 5, 'light framing avoids a beige cast')
+      assert.ok(channels[2] >= channels[0], 'light framing stays neutral or cool')
+    }
   })
 })

@@ -24,7 +24,9 @@ async function withShell(options, verify, useAgent = false) {
   await page.route('**/*', async (route) => {
     const request = route.request()
     const target = new URL(request.url())
-    if (target.origin !== origin || target.pathname.startsWith('/graphql') || ['fetch', 'xhr'].includes(request.resourceType())) {
+    if (target.origin === 'https://tiles.openfreemap.org') return route.abort()
+    if (target.origin !== origin || /^\/(api|graphql)(\/|$)/.test(target.pathname)
+      || (['fetch', 'xhr'].includes(request.resourceType()) && !target.pathname.startsWith('/src/'))) {
       disallowedRequests.push(target.href)
       return route.abort()
     }
@@ -51,6 +53,11 @@ async function withShell(options, verify, useAgent = false) {
 async function assertSection(page, name) {
   await page.getByRole('heading', { name, level: 1, exact: true }).waitFor()
   assert.equal(new URL(page.url()).pathname, `/${name.toLowerCase()}`)
+  if (name === 'Map') {
+    await page.getByRole('region', { name: 'Map workspace', exact: true }).waitFor()
+    assert.match(await page.getByRole('main').innerText(), /fixture/i)
+    return
+  }
   assert.match(await page.getByRole('main').innerText(), /not built yet/)
   assert.match(await page.getByRole('main').innerText(), /no live data connection/)
 }
@@ -99,7 +106,7 @@ test('desktop header reaches every section and keeps an understated footer at th
   })
 })
 
-test('navigation controls, icons, and labels do not move when the selected section changes', async () => {
+test('navigation controls, icons, and labels stay stable between standard section routes', async () => {
   for (const width of [1440, 390]) {
     await withShell({ viewport: { width, height: 900 } }, async (page) => {
       const nav = page.getByRole('navigation', { name: 'Main navigation' })
@@ -113,7 +120,7 @@ test('navigation controls, icons, and labels do not move when the selected secti
           }),
         })))
       const initial = await geometry()
-      for (const name of primarySections) {
+      for (const name of primarySections.filter(name => name !== 'Map')) {
         await nav.getByRole('link', { name, exact: true }).click()
         await assertSection(page, name)
         assert.deepEqual(await geometry(), initial, `${name} selection must not move navigation`)
@@ -130,6 +137,28 @@ test('navigation controls, icons, and labels do not move when the selected secti
   }
 })
 
+test('Packets and Map share header and navigation geometry before and after lazy map loading', async () => {
+  for (const options of [
+    { viewport: { width: 1440, height: 900 } },
+    { viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true },
+  ]) {
+    await withShell(options, async page => {
+      const geometry = () => page.evaluate(() => Object.fromEntries(['.app-header', '.app-brand', '.app-navigation', '.app-appearance-trigger'].map(selector => {
+        const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect()
+        return [selector, { x, y, width, height }]
+      })))
+      const initial = await geometry()
+      const nav = page.getByRole('navigation', { name: 'Main navigation' })
+      await nav.getByRole('link', { name: 'Map', exact: true }).click()
+      await assertSection(page, 'Map')
+      assert.deepEqual(await geometry(), initial, 'Map must not apply route-specific shell sizing')
+      await nav.getByRole('link', { name: 'Packets', exact: true }).click()
+      await assertSection(page, 'Packets')
+      assert.deepEqual(await geometry(), initial, 'Loading map CSS must not change other routes')
+    })
+  }
+})
+
 test('mobile touch navigation moves overflow destinations into More and marks the current section', async () => {
   await withShell({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, async (page) => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
@@ -140,6 +169,7 @@ test('mobile touch navigation moves overflow destinations into More and marks th
       const link = nav.getByRole('link', { name, exact: true })
       await link.tap()
       await assertSection(page, name)
+       assert.ok(await nav.isVisible())
       assert.equal(await link.getAttribute('aria-current'), 'page')
       const bounds = await link.boundingBox()
       assert.ok(bounds.height >= 44 && bounds.width >= 44)
@@ -245,12 +275,12 @@ test('small and enlarged-text layouts scroll content clear of the bottom navigat
   }
 })
 
-test('cramped bottom navigation hides labels without losing accessible names or SDK actions', async () => {
-  for (const { width, fontSize, iconOnly } of [
-    { width: 320, fontSize: 16, iconOnly: true },
-    { width: 320, fontSize: 20, iconOnly: true },
-    { width: 390, fontSize: 16, iconOnly: false },
-    { width: 390, fontSize: 20, iconOnly: true },
+test('compact bottom navigation keeps visible labels, accessible names, and SDK actions', async () => {
+  for (const { width, fontSize } of [
+    { width: 320, fontSize: 16 },
+    { width: 320, fontSize: 20 },
+    { width: 390, fontSize: 16 },
+    { width: 390, fontSize: 20 },
   ]) {
     await withShell({ viewport: { width, height: 844 } }, async (page) => {
       await page.evaluate((size) => { document.documentElement.style.fontSize = `${size}px` }, fontSize)
@@ -258,7 +288,8 @@ test('cramped bottom navigation hides labels without losing accessible names or 
       for (const name of [...primarySections, 'More']) {
         const control = nav.getByRole(name === 'More' ? 'button' : 'link', { name, exact: true })
         assert.ok(await control.isVisible(), `${name} must remain accessible by name`)
-        assert.equal(await control.locator('span').isVisible(), !iconOnly, `${name} label at ${width}px / ${fontSize}px text`)
+        assert.ok(await control.locator('span').isVisible(), `${name} label at ${width}px / ${fontSize}px text`)
+        assert.equal(await control.evaluate(node => node.scrollWidth > node.clientWidth), false)
         assert.ok(await control.locator('svg').isVisible())
         const bounds = await control.boundingBox()
         assert.ok(bounds.width >= 44 && bounds.height >= 44)
@@ -307,7 +338,9 @@ test('SDK agents discover and operate shell navigation at desktop and mobile wid
       const act = async (steps) => {
         const result = await page.evaluate(async (steps) => {
           const { agent } = await import('/tests/kitchen-sink-agent.mjs')
-          return agent.act({ steps })
+          const controls = agent.snapshot().filter(entry => !entry.offPage)
+          return agent.act({ steps: steps.map(step => ({ ...step,
+            ref: controls.find(entry => entry.label === step.ref)?.ref ?? step.ref })) })
         }, steps)
         assert.equal(result.ok, true, result.error?.message)
       }

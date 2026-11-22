@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRootRoute, createRoute, createRouter, redirect, RouterProvider } from '@tanstack/react-router'
-import { StrictMode } from 'react'
+import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AppShell } from './components/layout/app-shell'
 import { KitchenSinkPage } from './routes/kitchen-sink/page'
 import { SectionPage } from './routes/section-page'
+
+const MapPage = lazy(() => import('./routes/map/page'))
 
 const rootRoute = createRootRoute()
 const appRoute = createRoute({
@@ -32,7 +34,7 @@ const channels = createRoute({
 const map = createRoute({
   getParentRoute: () => appRoute,
   path: '/map',
-  component: () => <SectionPage section="Map" />,
+  component: () => <Suspense fallback={<p role="status">Loading map workspace…</p>}><MapPage /></Suspense>,
 })
 const nodes = createRoute({
   getParentRoute: () => appRoute,

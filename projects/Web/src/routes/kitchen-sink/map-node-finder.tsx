@@ -4,6 +4,7 @@ import { useId, useMemo, type RefObject } from 'react'
 import type { EvidenceAnchor } from '../../components/map/map-path-evidence'
 import { NodeAvatar } from '../../components/nodes/node-avatar'
 import { nodeRoles } from '../../components/nodes/node-role'
+import { MapNodeList } from './map-node-list'
 
 const resultLimit = 8
 const countFormat = new Intl.NumberFormat('en')
@@ -18,9 +19,12 @@ type Props = {
   onSelect: (id: string) => void
   onClearSelection: () => void
   onExitOverlap: (restoreCanvasFocus: boolean) => void
+  presentation?: 'specimen' | 'compact'
+  hideTitle?: boolean
 }
 
-export function MapNodeFinder({ anchors, overlap, selectedId, input, query, onQueryChange, onSelect, onClearSelection, onExitOverlap }: Props) {
+export function MapNodeFinder({ anchors, overlap, selectedId, input, query, onQueryChange, onSelect, onClearSelection, onExitOverlap, presentation = 'specimen', hideTitle = false }: Props) {
+  const compact = presentation === 'compact'
   const inputId = useId()
   const helpId = useId()
   const byId = useMemo(() => new Map(anchors.map(anchor => [anchor.id, {
@@ -53,15 +57,24 @@ export function MapNodeFinder({ anchors, overlap, selectedId, input, query, onQu
     : count === 0 ? 'No matching nodes.'
       : count > resultLimit ? `Showing ${resultLimit} of ${countFormat.format(count)} ${term ? 'matches' : 'nodes'}. Refine your search to see fewer results.`
         : `${count} ${term ? (count === 1 ? 'matching node' : 'matching nodes') : 'overlapping nodes'}.`
+  const compactStatus = !term && !inOverlap ? ''
+    : count === 0 ? 'No matching nodes.'
+      : `${countFormat.format(count)} ${term ? (count === 1 ? 'match' : 'matches') : 'overlapping'}${count > resultLimit ? ` · ${resultLimit} shown` : ''}`
 
   return (
-    <section className="ks-map-finder" aria-label="Map node finder" onKeyDown={event => {
+    <section className={compact ? 'ks-map-finder-compact' : 'ks-map-finder'} aria-label="Map node finder" onKeyDown={event => {
       if (!inOverlap || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return
       event.preventDefault()
       event.stopPropagation()
       onExitOverlap(true)
     }}>
-      <div className="ks-map-finder-search">
+      {compact ? <MapNodeList matches={results} title="Find node" hideTitle={hideTitle} searchLabel="Name or node ID" listLabel="Node search results"
+        query={query} onQueryChange={onQueryChange} input={input} count={null} status={resultStatus}
+        feedback={(term || inOverlap) && count === 0 ? 'No matching nodes.' : null} visibleStatus={count > 0 ? compactStatus : undefined}
+        description={`${inOverlap ? `Search these ${countFormat.format(overlap.length)} overlapping nodes by name or node ID. Press Escape to search all nodes.`
+          : `Search all ${countFormat.format(anchors.length)} nodes by name or node ID.`}${count > resultLimit ? ' Refine your search to see fewer results.' : ''}`}
+        action={inOverlap ? <Button className="map-preview-button" onClick={() => onExitOverlap(false)}>Search all nodes</Button> : undefined}
+        selectedId={selectedId} onSelect={onSelect} /> : <div className="ks-map-finder-search">
         <div className="ks-map-finder-heading">
           <label className="ks-field-label" htmlFor={inputId}>Find node</label>
           {inOverlap && <Button className="map-preview-button" onClick={() => onExitOverlap(false)}>Search all nodes</Button>}
@@ -84,8 +97,8 @@ export function MapNodeFinder({ anchors, overlap, selectedId, input, query, onQu
             </Button>
           </li>)}
         </ul>}
-      </div>
-      <section className="ks-map-finder-selection" aria-label="Selected node">
+      </div>}
+      {(!compact || selected) && <section className="ks-map-finder-selection" aria-label="Selected node">
         <h4>Selection</h4>
         <p className="ks-map-finder-selected-name" role="status" aria-atomic="true">
           {selected ? <>Selected node: <strong>{selected.name}</strong></> : 'No node selected.'}
@@ -96,7 +109,7 @@ export function MapNodeFinder({ anchors, overlap, selectedId, input, query, onQu
           <p className="ks-map-inspector-note">Node ID: <code>{selected.id}</code></p>
           <Button className="map-preview-button" onClick={onClearSelection}>Clear selection</Button>
         </>}
-      </section>
+      </section>}
     </section>
   )
 }

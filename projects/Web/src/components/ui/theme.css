@@ -2,15 +2,27 @@
 
 :root {
   color-scheme: light;
-  --ks-ground: light-dark(#eae9e4, #13171b);
-  --ks-paper: light-dark(#f6f5f0, #1c2228);
-  --ks-ink: light-dark(#232a30, #e8ebef);
-  --ks-muted: light-dark(#5b626b, #aab3be);
-  --ks-rule: light-dark(#d8d7d1, #39414a);
-  --ks-control-edge: light-dark(#797f86, #75808c);
-  --ks-accent: light-dark(#2857a4, #a0c0ff);
-  --ks-accent-wash: light-dark(#e7edf7, #2b3b54);
-  --ks-on-accent: light-dark(#fff, #17243a);
+  --ks-ground: light-dark(#f3f5f7, #1f1f1f);
+  --ks-paper: light-dark(#ffffff, #1f1f1f);
+  --ks-chrome: light-dark(#f8f9fa, #181818);
+  --ks-rail: light-dark(transparent, #181818);
+  --ks-chrome-heading: light-dark(#f3f5f7, #181818);
+  --ks-raised: light-dark(#ffffff, #222222);
+  --ks-input: light-dark(#ffffff, #313131);
+  --ks-input-ground: light-dark(#f3f5f7, #313131);
+  --ks-ink: light-dark(#232a30, #cccccc);
+  --ks-muted: light-dark(#565d66, #9d9d9d);
+  --ks-rule: light-dark(#d5d9de, #2b2b2b);
+  --ks-control-edge: light-dark(#6f767e, #808080);
+  --ks-appearance-edge: light-dark(#d5d9de, #808080);
+  --ks-accent: light-dark(#2857a4, #4daafc);
+  --ks-accent-wash: light-dark(#e7edf7, #23354a);
+  --ks-action: light-dark(#2857a4, #0078d4);
+  --ks-action-hover: light-dark(#232a30, #0070c4);
+  --ks-on-accent: #fff;
+  --ks-focus: light-dark(#2857a4, #c0dfff);
+  --ks-calendar-focus: light-dark(#232a30, #c0dfff);
+  --ks-calendar-selected-focus: light-dark(#ffffff, #c0dfff);
   --ks-warning: light-dark(#855514, #f0c37b);
   --ks-error: light-dark(#a02e3b, #ffadb7);
   --ks-shadow: light-dark(rgb(26 32 41 / 12%), rgb(0 0 0 / 32%));
@@ -35,7 +47,7 @@
   --ks-tone-fill: light-dark(var(--ks-tone-light-fill), var(--ks-tone-dark-fill));
   --ks-tone-ink: light-dark(var(--ks-tone-light-ink), var(--ks-tone-dark-ink));
 }
-[data-tone='neutral'] { --ks-tone-light-fill: #eef2f1; --ks-tone-light-ink: #42514c; --ks-tone-dark-fill: #2c3d37; --ks-tone-dark-ink: #d7e6df; }
+[data-tone='neutral'] { --ks-tone-light-fill: #f3f5f7; --ks-tone-light-ink: #565d66; --ks-tone-dark-fill: #313131; --ks-tone-dark-ink: #cccccc; }
 [data-tone='green'] { --ks-tone-light-fill: #e5f4eb; --ks-tone-light-ink: #1d5c43; --ks-tone-dark-fill: #233f34; --ks-tone-dark-ink: #a9e2c3; }
 [data-tone='violet'] { --ks-tone-light-fill: #f0eaf9; --ks-tone-light-ink: #574184; --ks-tone-dark-fill: #3a2e50; --ks-tone-dark-ink: #dec8ff; }
 [data-tone='blue'] { --ks-tone-light-fill: #e7f0fa; --ks-tone-light-ink: #294e7e; --ks-tone-dark-fill: #293d55; --ks-tone-dark-ink: #bddaff; }
@@ -47,7 +59,7 @@
 .ks-public-key { font-family: var(--ks-mono); overflow-wrap: anywhere; }
 
 @media (forced-colors: active) {
-  :root { --ks-focus: Highlight; }
+  :root { --ks-focus: Highlight; --ks-calendar-focus: Highlight; --ks-calendar-selected-focus: Highlight; }
 }
 
 @media (forced-colors: active), print {

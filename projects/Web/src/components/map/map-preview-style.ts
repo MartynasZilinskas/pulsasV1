@@ -27,8 +27,8 @@ export const labelZoom = 12
 export const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
 const palettes = {
-  light: { strong: '#165e47', weak: '#8b5719', flow: '#a24319', ink: '#24342c', casing: '#ffffff', gap: '#fffaf1' },
-  dark: { strong: '#92e4bc', weak: '#ffca82', flow: '#ff9f78', ink: '#edf4ee', casing: '#17211f', gap: '#2b2318' },
+  light: { strong: '#165e47', weak: '#8b5719', flow: '#a24319', ink: '#232a30', casing: '#ffffff', gap: '#fffaf1', cluster: '#2857a4', neutralInk: '#565d66', neutralFill: '#f3f5f7' },
+  dark: { strong: '#92e4bc', weak: '#ffca82', flow: '#ff9f78', ink: '#cccccc', casing: '#1f1f1f', gap: '#2b2318', cluster: '#4daafc', neutralInk: '#cccccc', neutralFill: '#313131' },
 }
 const white = '#fff'
 const rolePixelRatio = 3
@@ -82,10 +82,13 @@ const casingWidth = 8
 const possibleDashes = [8, 6]
 
 export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecification {
-  const { strong: strongColor, weak: weakColor, flow: flowColor, ink, casing } = palettes[theme]
-  const roleInk = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], strongColor] satisfies ExpressionSpecification
-  const roleFill = ['coalesce', ['get', theme === 'dark' ? 'roleDarkFill' : 'roleFill'], strongColor] satisfies ExpressionSpecification
+  const { strong: strongColor, weak: weakColor, flow: flowColor, ink, casing, cluster, neutralInk, neutralFill } = palettes[theme]
+  const roleInk = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], neutralInk] satisfies ExpressionSpecification
+  const roleFill = ['coalesce', ['get', theme === 'dark' ? 'roleDarkFill' : 'roleFill'], neutralFill] satisfies ExpressionSpecification
   const roleEdge = ['coalesce', ['get', theme === 'dark' ? 'roleDarkInk' : 'roleInk'], white] satisfies ExpressionSpecification
+  const dotFill = theme === 'dark'
+    ? ['case', isEvidence, roleInk, ['interpolate', ['linear'], 0.55, 0, roleFill, 1, roleInk]] satisfies ExpressionSpecification
+    : roleInk
   const textPaint = { 'text-color': ink, 'text-halo-color': casing, 'text-halo-width': 1.7 }
   const nameOpacity = ['case', ['boolean', ['feature-state', 'nameOutsideViewport'], false], 0, 1] satisfies ExpressionSpecification
   const confidenceInk = ['case', isWeak, weakColor, strongColor] as const
@@ -112,7 +115,7 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
         'line-color': flowColor, 'line-opacity': ['get', 'opacity'], 'line-width': 3, 'line-dasharray': [2, 1.5],
       } },
       { id: clusterLayer, source: 'markers', type: 'circle', filter: ['has', 'point_count'], paint: {
-        'circle-radius': 17, 'circle-color': strongColor, 'circle-stroke-color': casing, 'circle-stroke-width': 2,
+        'circle-radius': 17, 'circle-color': cluster, 'circle-stroke-color': casing, 'circle-stroke-width': 2,
       } },
       { id: 'preview-cluster-count', source: 'markers', type: 'symbol', filter: ['has', 'point_count'], layout: {
         'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['sans-serif'], 'text-size': 13, 'text-allow-overlap': true, 'text-ignore-placement': true,
@@ -124,8 +127,8 @@ export function offlineStyle(theme: MapPreviewTheme = 'light'): StyleSpecificati
       // Keep generous hit areas in the role band, where a separate layer draws the smaller face.
       { id: markerLayer, source: 'markers', type: 'circle', filter: isNode, paint: {
         'circle-radius': ['step', ['zoom'], ['case', isEvidence, 6, 5], roleZoom, ['case', isEvidence, 16, 18]],
-        'circle-color': ['step', ['zoom'], roleInk, roleZoom, roleFill],
-        'circle-stroke-color': ['step', ['zoom'], white, roleZoom, roleEdge],
+        'circle-color': ['step', ['zoom'], dotFill, roleZoom, roleFill],
+        'circle-stroke-color': ['step', ['zoom'], theme === 'dark' ? casing : white, roleZoom, roleEdge],
         'circle-stroke-width': ['case', isEvidence, 0, 2],
         'circle-opacity': ['step', ['zoom'], 1, roleZoom, 0], 'circle-stroke-opacity': ['step', ['zoom'], 1, roleZoom, 0],
       } },

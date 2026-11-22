@@ -266,7 +266,7 @@ test('hover and keyboard focus reveal full native and fan names without picking 
     await showcase.getByRole('radio', { name: 'Dark', exact: true }).click()
     await canvas.hover()
     await native.getByText('LT-KM ROOT ED', { exact: true }).waitFor()
-    assert.equal(await native.locator('.maplibregl-popup-content').evaluate(el => getComputedStyle(el).color), 'rgb(237, 244, 238)')
+    assert.equal(await native.locator('.maplibregl-popup-content').evaluate(el => getComputedStyle(el).color), 'rgb(204, 204, 204)')
     await page.evaluate(() => {
       const map = window.overlapMap, point = map.project([23.89257, 54.91074])
       map.panBy([point.x - 8, 0], { duration: 0 })

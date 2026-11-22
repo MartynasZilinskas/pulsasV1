@@ -1,18 +1,18 @@
 .map-preview {
   min-inline-size: 0;
-  --map-ground: #edf3ef;
-  --map-grid: #b6c8be;
-  --map-canvas-focus: #165e47;
-  --map-crosshair: #182420;
+  --map-ground: #f3f5f7;
+  --map-grid: #c5cbd1;
+  --map-canvas-focus: #2857a4;
+  --map-crosshair: #232a30;
   --map-crosshair-halo: #fff;
 }
 
 .map-preview[data-map-theme='dark'] {
-  --map-ground: #202a29;
-  --map-grid: #45534d;
-  --map-canvas-focus: #92e4bc;
-  --map-crosshair: #edf4ee;
-  --map-crosshair-halo: #17211f;
+  --map-ground: #1f1f1f;
+  --map-grid: #444444;
+  --map-canvas-focus: #c0dfff;
+  --map-crosshair: #cccccc;
+  --map-crosshair-halo: #1f1f1f;
 }
 
 .map-preview-toolbar {
@@ -127,7 +127,7 @@
   padding: 0 24px 0 0;
   border-radius: 0;
   background: #fff;
-  color: #24342c;
+  color: #232a30;
 }
 
 .map-preview-canvas .maplibregl-ctrl-attrib.maplibregl-compact[open] {
@@ -158,9 +158,9 @@
   line-height: 1.35;
 }
 
-.map-preview-canvas .maplibregl-ctrl-attrib a { color: #24342c; text-decoration: underline; }
+.map-preview-canvas .maplibregl-ctrl-attrib a { color: #232a30; text-decoration: underline; }
 .map-preview-canvas .maplibregl-ctrl-attrib :is(a, summary):focus-visible {
-  outline: 2px solid #165e47;
+  outline: 2px solid #2857a4;
   outline-offset: -2px;
 }
 

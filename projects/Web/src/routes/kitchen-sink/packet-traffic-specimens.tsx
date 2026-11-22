@@ -152,7 +152,7 @@ function receptionReturnTarget(workspace: HTMLElement | null, id?: string) {
     ? row : scroller
 }
 
-function ReceptionFacts({ row }: { row: PacketTableRow }) {
+export function ReceptionFacts({ row }: { row: PacketTableRow }) {
   return (
     <dl className="ks-reception-facts" data-drawer-no-drag="">
       <div><dt>Code</dt><dd><code>{row.code}</code></dd></div>
@@ -206,7 +206,10 @@ function ReceptionDetails({ drawer, title, hint, row, announcement, filterNote, 
   </>
 }
 
-export function PacketTrafficSpecimens() {
+export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }: {
+  presentation?: 'specimen' | 'workspace'
+  inspection?: { selectedId?: string; controls: string; onSelect: (row: PacketTableRow) => void }
+}) {
   const heading = useId()
   const rangeStatus = useId()
   const activeFilterStatus = useId()
@@ -226,8 +229,8 @@ export function PacketTrafficSpecimens() {
     buckets, series, totalReceptions, loadedReceptions, rows, range, setRange, hasMore, isLoadingMore, loadMore, resetKey, referenceTime,
     filterGroups, filterValues, setFilterValues, activeFilterCount, matchesReception, hashQuery, setHashQuery,
   } = usePacketTrafficDemo()
-  const [filtersVisible, setFiltersVisible] = useState(true)
-  const filterRail = filtersVisible && layout === 'rail'
+  const [filtersVisible, setFiltersVisible] = useState(presentation === 'specimen')
+  const filterRail = presentation === 'specimen' && filtersVisible && layout === 'rail'
   const [editorOpen, setEditorOpen] = useState(false)
   const [edits, setEdits] = useState<HistogramRange | null>(null)
   const [submitted, setSubmitted] = useState(false)
@@ -287,6 +290,10 @@ export function PacketTrafficSpecimens() {
   }
 
   function selectReception(row: PacketTableRow, returnToDetailsButton = false) {
+    if (inspection) {
+      inspection.onSelect(row)
+      return
+    }
     const index = receptions.indexOf(row)
     const announcement = index >= 0
       ? `Reception ${index + 1} of ${receptions.length}: ${row.code}, ${row.region}, ${timestamp.format(Date.parse(row.arrivedAt))}`
@@ -332,17 +339,8 @@ export function PacketTrafficSpecimens() {
     dismissDetails()
   }
 
-  return (
-    <section className="ks-section ks-packet-traffic" aria-labelledby={heading}>
-      <div className="ks-section-heading">
-        <h2 id={heading}>Packet traffic</h2>
-        <p>24 hours · {count.format(totalReceptions)} sample receptions. Filter the list or select a reception to view its details.</p>
-      </div>
-      <Collapsible className="ks-traffic-layout" data-filter-rail={filterRail ? '' : undefined} open={filtersVisible} onOpenChange={(open) => {
-        setFiltersVisible(open)
-        if (!open) setEditorOpen(false)
-      }}>
-        <CollapsiblePanel className="ks-traffic-filters" role="region" aria-label="Packet traffic filters" tabIndex={filtersVisible ? 0 : undefined} keepMounted>
+  const trafficContent = <>
+        {presentation === 'specimen' && <CollapsiblePanel className="ks-traffic-filters" role="region" aria-label="Packet traffic filters" tabIndex={filtersVisible ? 0 : undefined} keepMounted>
           {filterRail && <h3 className="ks-traffic-filters-heading">Filters</h3>}
           {filtersVisible && <div className="ks-arrival-filter">
             <Popover presentation="auto" open={editorOpen} onOpenChange={(open, { reason }) => {
@@ -383,10 +381,10 @@ export function PacketTrafficSpecimens() {
           </div>}
           {filtersVisible && filterGroups.map(group => <TrafficFilterSection key={group.key} group={group} values={filterValues[group.key] ?? []}
             onValuesChange={values => setFilterValues(group.key, values)} />)}
-        </CollapsiblePanel>
+        </CollapsiblePanel>}
         <div className="ks-traffic-workspace" ref={workspace} data-inspecting={inline && selected ? '' : undefined}>
           <div className="ks-traffic-list" onKeyDown={onListKeys}>
-            <div className="ks-traffic-overview">
+            {presentation === 'specimen' && <div className="ks-traffic-overview">
               <div className="ks-traffic-hash-control">
                 <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <circle cx="7" cy="7" r="4.25" />
@@ -420,19 +418,33 @@ export function PacketTrafficSpecimens() {
                 {!inline && details && <Button className="ks-traffic-clear" ref={detailsButton} hidden={details.open} aria-haspopup="dialog"
                   onClick={() => selectReception(details.row, true)}>Go to details</Button>}
               </div>
-            </div>
+            </div>}
             <PacketTable rows={rows} referenceTime={referenceTime} timeZone={timeZone} timeZoneLabel={timeZoneLabel} resetKey={resetKey} hasMore={hasMore} isLoadingMore={isLoadingMore}
-              loadMore={loadMore} selectedId={selected?.id} onActivate={selectReception} onNavigate={inline && selected ? selectReception : undefined}
-              selectionControls={inline ? detailsId : undefined} />
+              compact={presentation === 'workspace' && layout === 'compact'}
+              statusLabels={presentation === 'workspace' ? { live: 'Sample receptions', resumed: 'Fixture resumed', 'lost-connection': 'Fixture connection gap' } : undefined}
+              loadMore={loadMore} selectedId={inspection ? inspection.selectedId : selected?.id} onActivate={selectReception}
+              onNavigate={(inspection ? inspection.selectedId !== undefined : inline && selected) ? selectReception : undefined}
+              selectionControls={inspection ? inspection.controls : inline ? detailsId : undefined} />
           </div>
           {inline && selected && <section className="ks-reception-details ks-reception-inspector" id={detailsId} ref={inspector} tabIndex={-1}
             aria-labelledby={title} aria-describedby={hint} onKeyDown={onDetailsKeys}>
             <ReceptionDetails drawer={false} title={title} hint={hint} row={selected} filterNote={filterNote} close={closeInspector} />
           </section>}
         </div>
-      </Collapsible>
+  </>
+
+  return (
+    <section className="ks-section ks-packet-traffic" data-presentation={presentation} aria-labelledby={heading}>
+      <div className={presentation === 'workspace' ? 'ks-visually-hidden' : 'ks-section-heading'}>
+        <h2 id={heading}>Packet traffic</h2>
+        {presentation === 'specimen' && <p>24 hours · {count.format(totalReceptions)} sample receptions. Filter the list or select a reception to view its details.</p>}
+      </div>
+      {presentation === 'specimen' ? <Collapsible className="ks-traffic-layout" data-filter-rail={filterRail ? '' : undefined} open={filtersVisible} onOpenChange={(open) => {
+        setFiltersVisible(open)
+        if (!open) setEditorOpen(false)
+      }}>{trafficContent}</Collapsible> : <div className="ks-traffic-layout">{trafficContent}</div>}
       {inline && <div className="ks-visually-hidden" role="status">{announcement}</div>}
-      {!inline && <Drawer side="end" modal open={details?.open ?? false} onOpenChange={(open) => {
+      {!inspection && !inline && <Drawer side="end" modal open={details?.open ?? false} onOpenChange={(open) => {
         if (!open) dismissDetails()
       }}>
         <DrawerBackdrop className="ks-reception-drawer-backdrop" />

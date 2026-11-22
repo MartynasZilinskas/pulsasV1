@@ -56,7 +56,7 @@ function ageLabel(timestamp: string, referenceTime: string) {
   return relative.format(-Math.floor(seconds / 86400), 'day')
 }
 
-export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLabel = timeZone, resetKey, hasMore, isLoadingMore, loadMore, selectedId, onActivate, onNavigate, selectionControls, isLoading = false, error, retry }: {
+export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLabel = timeZone, resetKey, hasMore, isLoadingMore, loadMore, selectedId, onActivate, onNavigate, selectionControls, isLoading = false, error, retry, compact = false, statusLabels }: {
   rows: readonly (PacketTableRow | PacketTableStatusRow)[]
   referenceTime: string
   timeZone?: string
@@ -72,7 +72,10 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   isLoading?: boolean
   error?: string
   retry?: () => void
+  compact?: boolean
+  statusLabels?: Partial<Record<PacketTableStatusRow['status'], string>>
 }) {
+  const visibleColumns = compact ? ['Age', 'Type', 'Summary'] : columns
   const caption = useId()
   const scroller = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLTableSectionElement>(null)
@@ -233,7 +236,7 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   }
 
   const spacer = (count: number) => count > 0 && <tr aria-hidden="true" className="packet-reception-table-spacer">
-    <td colSpan={columns.length} style={{ height: count * rowHeight }} />
+    <td colSpan={visibleColumns.length} style={{ height: count * rowHeight }} />
   </tr>
   let cursor = 0
 
@@ -245,12 +248,13 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
       }} onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setFocusedId(null)
       }}>
-      <table className="packet-reception-table" aria-labelledby={caption} aria-rowcount={rows.length ? rows.length + 1 : undefined}>
+      <table className="packet-reception-table" data-compact={compact || undefined} aria-labelledby={caption} aria-rowcount={rows.length ? rows.length + 1 : undefined}>
         <caption className="ks-visually-hidden" id={caption}>Packet receptions</caption>
-        <colgroup><col className="packet-col-code" /><col className="packet-col-type" /><col className="packet-col-route" />
-          <col /><col className="packet-col-region" /><col className="packet-col-age" /></colgroup>
+        {compact ? <colgroup><col className="packet-col-age" /><col className="packet-col-type" /><col /></colgroup>
+          : <colgroup><col className="packet-col-code" /><col className="packet-col-type" /><col className="packet-col-route" />
+            <col /><col className="packet-col-region" /><col className="packet-col-age" /></colgroup>}
         <thead ref={head}>
-          <tr>{columns.map((title) => <th scope="col" key={title}>{title}</th>)}</tr>
+          <tr>{visibleColumns.map((title) => <th scope="col" key={title}>{title}</th>)}</tr>
         </thead>
         <tbody>
           {indexes.map((index) => {
@@ -258,14 +262,14 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
             const gap = index - cursor
             cursor = index + 1
             if (isStatusRow(row)) return <PacketStatusEntry key={`status:${row.id}`} leading={spacer(gap)} row={row} index={index}
-              clock={clock} timestamp={timestamp} timeZoneLabel={timeZoneLabel} />
+              clock={clock} timestamp={timestamp} timeZoneLabel={timeZoneLabel} columnCount={visibleColumns.length} label={statusLabels?.[row.status]} />
             return <PacketTableEntry key={`packet:${row.id}`} leading={spacer(gap)} row={row} index={index} referenceTime={referenceTime}
               arrivalLabel={`${timestamp.format(Date.parse(row.arrivedAt))} (${timeZoneLabel})`} selected={selectedId === row.id}
-              onActivate={onActivate} selectionControls={selectionControls} />
+              onActivate={onActivate} selectionControls={selectionControls} compact={compact} />
           })}
           {spacer(rows.length - cursor)}
           {!rows.length && !hasMore && !isLoading && !error && <tr className="packet-reception-table-message">
-            <td colSpan={columns.length}>No receptions match the current filters.</td>
+            <td colSpan={visibleColumns.length}>No receptions match the current filters.</td>
           </tr>}
         </tbody>
       </table>
@@ -283,22 +287,24 @@ export function PacketTable({ rows, referenceTime, timeZone = 'UTC', timeZoneLab
   )
 }
 
-function PacketStatusEntry({ leading, row, index, clock, timestamp, timeZoneLabel }: {
+function PacketStatusEntry({ leading, row, index, clock, timestamp, timeZoneLabel, columnCount, label: labelOverride }: {
   leading: ReactNode
   row: PacketTableStatusRow
   index: number
   clock: Intl.DateTimeFormat
   timestamp: Intl.DateTimeFormat
   timeZoneLabel: string
+  columnCount: number
+  label?: string
 }) {
   const { label, icon, tone } = statusPresentation[row.status]
   const instant = row.occurredAt ? Date.parse(row.occurredAt) : undefined
   const absolute = instant === undefined ? undefined : `${timestamp.format(instant)} (${timeZoneLabel})`
   return <>{leading}<tr className="packet-feed-status" data-feed-status={row.status} data-tone={tone} data-row-index={index} aria-rowindex={index + 2}>
-    <td colSpan={columns.length}>
+    <td colSpan={columnCount}>
       <div className="packet-feed-status-content">
         <LucideGlyph name={icon} />
-        <strong>{label}</strong>
+        <strong>{labelOverride ?? label}</strong>
         {instant !== undefined && <time dateTime={row.occurredAt} title={absolute}>
           <span aria-hidden="true">{clock.format(instant)}</span><span className="ks-visually-hidden">{absolute}</span>
         </time>}
@@ -318,7 +324,7 @@ function passiveRowTarget(row: HTMLTableRowElement, target: EventTarget) {
   return cell?.parentElement === row ? cell : null
 }
 
-function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, selected, onActivate, selectionControls }: {
+function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, selected, onActivate, selectionControls, compact }: {
   leading: ReactNode
   row: PacketTableRow
   index: number
@@ -327,9 +333,13 @@ function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, se
   selected: boolean
   onActivate?: (row: PacketTableRow) => void
   selectionControls?: string
+  compact: boolean
 }) {
   const press = useRef<{ target: HTMLTableRowElement | HTMLTableCellElement; pointerId: number; x: number; y: number } | null>(null)
   const cancelPress = () => { press.current = null }
+  const age = <td><time dateTime={row.arrivedAt} title={arrivalLabel} className="packet-reception-age">
+    {ageLabel(row.arrivedAt, referenceTime)}<span className="ks-visually-hidden"> · {arrivalLabel}</span>
+  </time></td>
 
   return <>{leading}<tr className="packet-reception-row" data-reception-id={row.id} data-row-index={index}
     data-selected={selected ? '' : undefined} data-activatable={onActivate ? '' : undefined} aria-rowindex={index + 2}
@@ -371,13 +381,11 @@ function PacketTableEntry({ leading, row, index, referenceTime, arrivalLabel, se
       event.currentTarget.focus({ preventScroll: true })
       onActivate(row)
     })}>
-    <td><code className="packet-reception-code" title={row.code}>{row.code}</code></td>
+    {compact ? age : <td><code className="packet-reception-code" title={row.code}>{row.code}</code></td>}
     <td className="packet-reception-type"><PacketTypeBadge code={row.packetType} /></td>
-    <td><RouteBadge route={row.route} scope={row.scope} /></td>
-    <td><span className="packet-reception-summary packet-reception-copy" title={row.summary}>{row.summary}</span></td>
-    <td><span className="packet-reception-summary" title={row.region}>{row.region}</span></td>
-    <td><time dateTime={row.arrivedAt} title={arrivalLabel} className="packet-reception-age">
-      {ageLabel(row.arrivedAt, referenceTime)}<span className="ks-visually-hidden"> · {arrivalLabel}</span>
-    </time></td>
+    {!compact && <td><RouteBadge route={row.route} scope={row.scope} /></td>}
+    <td><span className={`packet-reception-summary${compact ? '' : ' packet-reception-copy'}`} title={row.summary}>{row.summary}</span></td>
+    {!compact && <td><span className="packet-reception-summary" title={row.region}>{row.region}</span></td>}
+    {!compact && age}
   </tr></>
 }

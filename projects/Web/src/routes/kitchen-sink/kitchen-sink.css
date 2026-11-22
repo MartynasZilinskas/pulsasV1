@@ -51,7 +51,7 @@
 .ks-index a { display: flex; align-items: center; gap: 0.625rem; min-block-size: 2.75rem; padding: 0.375rem 0.5rem; border-inline-start: 1px solid var(--ks-rule); color: var(--ks-muted); font-size: 0.75rem; text-decoration: none; }
 .ks-index a > span { color: var(--ks-accent); font: 0.625rem/1.4 var(--ks-mono); }
 .ks-index a:hover { border-color: var(--ks-accent); color: var(--ks-accent); background: var(--ks-accent-wash); }
-.ks-index a:focus-visible { outline: 2px solid var(--ks-accent); outline-offset: -2px; }
+.ks-index a:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: -2px; }
 .ks-specimens { min-inline-size: 0; }
 .ks-specimens :is(h2[id], #ks-filter-controls, #ks-traffic-browser) { scroll-margin-block-start: 6rem; }
 
@@ -88,7 +88,7 @@
   inline-size: 100%;
   border: 1px solid var(--ks-control-edge);
   border-radius: var(--ks-radius);
-  background: var(--ks-paper);
+  background: var(--ks-input);
   cursor: pointer;
 }
 .ks-select-trigger:is(:hover, [data-open]) { background: var(--ks-ground); }
@@ -100,7 +100,7 @@
   padding: 0.25rem;
   border: 1px solid var(--ks-control-edge);
   border-radius: var(--ks-radius);
-  background: var(--ks-paper);
+  background: var(--ks-raised);
   box-shadow: 0 8px 24px var(--ks-shadow);
 }
 .ks-page .ks-select-content[hidden] { display: none; }
@@ -127,16 +127,16 @@
   color: var(--ks-on-accent);
   cursor: pointer;
 }
-.ks-checkbox[data-checked] { border-color: var(--ks-accent); background: var(--ks-accent); }
+.ks-checkbox[data-checked] { border-color: var(--ks-action); background: var(--ks-action); }
 .ks-checkbox .ks-glyph { inline-size: 0.875rem; block-size: 0.875rem; }
 
 .ks-preview { min-inline-size: 0; padding: 1.125rem; }
 .ks-surfaces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; }
 .ks-surface {
-  --ks-stage: light-dark(#eae9e4, #13171b);
-  --ks-grid-dot: light-dark(#d0d1ce, #3c454f);
-  --ks-stage-ink: light-dark(#5b626b, #aab3be);
-  --ks-stage-edge: light-dark(#d8d7d1, #39414a);
+  --ks-stage: light-dark(#f3f5f7, #1f1f1f);
+  --ks-grid-dot: light-dark(#d9dde3, #3c3c3c);
+  --ks-stage-ink: light-dark(#565d66, #9d9d9d);
+  --ks-stage-edge: light-dark(#d5d9de, #2b2b2b);
   display: grid;
   grid-template-rows: auto 1fr;
   min-inline-size: 0;

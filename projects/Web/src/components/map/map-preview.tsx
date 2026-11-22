@@ -1,5 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { Radio, RadioGroup } from '@ui-sdk/react/radio'
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { MapOverlap } from './map-overlap-view'
 import { screenOverlaps, type ScreenOverlap } from './map-overlap'
 import { LngLatBounds, Map as MapLibre, Popup, type GeoJSONSource, type MapGeoJSONFeature } from 'maplibre-gl'
@@ -37,6 +38,7 @@ type MapPreviewProps = {
   onViewportNodesChange?: (ids: readonly string[] | null) => void
   flow?: PreviewFlowInput; playback?: FlowPlayback | null; onFlowFinish?: () => void
   renderControls?: (ready: boolean) => ReactNode
+  presentation?: 'specimen' | 'workspace'
 }
 
 function renderedIds(features: readonly MapGeoJSONFeature[]): string[] {
@@ -111,7 +113,7 @@ function frameDiagnosticsEnabled() {
   return new URLSearchParams(window.location.search).has('mapDiagnostics')
 }
 
-export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls }: MapPreviewProps) {
+export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls, presentation = 'specimen' }: MapPreviewProps) {
   const container = useRef<HTMLDivElement>(null)
   const artwork = useRef<HTMLDivElement>(null)
   const framing = useRef<{ map: MapLibre; sceneId: string } | null>(null)
@@ -125,7 +127,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const loadedMap = loadedPreview?.map ?? null
   const roleColors = loadedPreview?.roleColors
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [theme, setTheme] = useState<MapPreviewTheme>('light')
+  const [theme, setTheme] = useState<MapPreviewTheme>(() => presentation === 'workspace' && document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
   const [basemap, setBasemap] = useState<{ map: MapLibre; theme: MapPreviewTheme; attempt: number; status: 'ready' | 'error' } | null>(null)
   const [basemapAttempt, setBasemapAttempt] = useState(0)
   const [zoom, setZoom] = useState(11)
@@ -150,10 +152,26 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const trackViewportNodes = onViewportNodesChange !== undefined
   const [longitude, latitude] = center
 
+  useEffect(() => {
+    if (presentation !== 'workspace') return
+    const root = document.documentElement
+    const observer = new MutationObserver(() => setTheme(root.dataset.theme === 'dark' ? 'dark' : 'light'))
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [presentation])
+
   async function expandCluster(map: MapLibre, id: number, coordinates: Coordinates, control?: HTMLElement) {
     const scene = framing.current
     try {
-      const zoom = await map.getSource<GeoJSONSource>('markers')?.getClusterExpansionZoom(id)
+      const source = map.getSource<GeoJSONSource>('markers')
+      if (presentation === 'workspace' && source) {
+        const leaves = await source.getClusterLeaves(id, Infinity, 0)
+        if (framing.current !== scene || map.getSource('markers') !== source) return
+        const ids = leaves.flatMap(feature => typeof feature.properties?.[previewId] === 'string' ? [feature.properties[previewId] as string] : [])
+        if (ids.length) pick([...new Set(ids)])
+        return
+      }
+      const zoom = await source?.getClusterExpansionZoom(id)
       if (zoom === undefined || framing.current !== scene || !map.getSource('markers')) return
       map.easeTo({ center: [...coordinates], zoom: Math.max(zoom, map.getZoom(), zoomTarget.current ?? minZoom), duration: 420 })
       if (document.activeElement === control) map.getCanvas().focus({ preventScroll: true })
@@ -170,8 +188,8 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
     try {
       map = new MapLibre({
         container: element, style: offlineStyle(), center: [longitude, latitude], zoom: 11,
-        minZoom, maxZoom, scrollZoom: false, dragRotate: false, touchPitch: false,
-        cooperativeGestures: true, attributionControl: { compact: true }, renderWorldCopies: false, fadeDuration: 0,
+        minZoom, maxZoom, scrollZoom: presentation === 'workspace', dragRotate: false, touchPitch: false,
+        cooperativeGestures: presentation !== 'workspace', attributionControl: { compact: true }, renderWorldCopies: false, fadeDuration: 0,
         transformRequest: restrictMapRequest,
       })
     } catch (error) {
@@ -254,7 +272,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       canvas.removeEventListener('blur', clearPickMiss)
       map.remove()
     }
-  }, [attempt, longitude, latitude])
+  }, [attempt, longitude, latitude, presentation])
 
   useEffect(() => {
     if (!loadedMap) return
@@ -693,12 +711,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
     ? `Dots · below ${roleZoom}`
     : zoom < labelZoom ? `Role glyphs · ${roleZoom}–${labelZoom}` : `Names · ${labelZoom}+`
 
-  return (
-    <div className="map-preview" data-map-state={status} data-map-theme={theme} data-basemap-state={basemapStatus}>
-      <div hidden ref={artwork}>
-        {previewRoles.map((role) => <span key={role} data-tone={nodeRoles[role].tone}><NodeRoleIcon role={role} /></span>)}
-      </div>
-      <div className="map-preview-toolbar">
+  const controls = <>
         <span className="map-preview-zoom">{ready ? `Zoom ${zoom.toFixed(1)} · ${zoomLevel}` : 'Map controls'}</span>
         <RadioGroup className="map-preview-theme" aria-label="Map theme" value={theme}
           onValueChange={(value) => { if (value === 'light' || value === 'dark') setTheme(value) }}>
@@ -710,11 +723,38 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
           {!regional && <Button className="map-preview-button" aria-pressed={spiderfy} disabled={!ready} onClick={() => setSpiderfyEnabled(value => !value)}>Spiderfy</Button>}
         </div>}
         <Button className="map-preview-button" disabled={!ready} onClick={() => { if (loadedMap) fitScene(loadedMap, scene, center, selectedId) }}>{regional ? 'Fit all nodes' : 'Fit example'}</Button>
+        {presentation === 'specimen' && <div className="map-preview-control-pair">
+          <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom out" disabled={!ready || zoom <= minZoom} onClick={() => changeZoom(-1)}>−</Button>
+          <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom in" disabled={!ready || zoom >= maxZoom} onClick={() => changeZoom(1)}>+</Button>
+        </div>}
+  </>
+  const instructions = `Drag or use arrow keys to pan. On touch, use two fingers. Use the map controls or + / − to zoom. Select a node to zoom in. Press Enter on the map to select a node or ${presentation === 'workspace' ? 'list the nodes in a cluster' : 'expand a cluster'} at the crosshair.${onClearSelection ? ' Press Escape on the map to clear selection.' : ''}`
+
+  return (
+    <div className="map-preview" data-presentation={presentation} data-map-state={status} data-map-theme={theme} data-basemap-state={basemapStatus}>
+      <div hidden ref={artwork}>
+        {previewRoles.map((role) => <span key={role} data-tone={nodeRoles[role].tone}><NodeRoleIcon role={role} /></span>)}
+      </div>
+      {presentation === 'specimen' ? <div className="map-preview-toolbar">{controls}</div> : <div className="map-preview-workspace-controls">
+        <Popover>
+          <PopoverTrigger className="map-preview-button" aria-label="Map settings">
+            <span className="map-preview-settings-label">Map settings</span>
+            <svg className="map-preview-settings-icon" aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M3 5h14M3 10h14M3 15h14" />
+              <path d="M7 3v4m6 1v4m-6 1v4" strokeWidth="3" />
+            </svg>
+          </PopoverTrigger>
+          <PopoverContent className="map-preview-settings" align="end" sideOffset={6} collisionPadding={8}>
+            <PopoverTitle>Map settings</PopoverTitle>
+            <div className="map-preview-toolbar">{controls}</div>
+            <p className="map-preview-help">{instructions}</p>
+          </PopoverContent>
+        </Popover>
         <div className="map-preview-control-pair">
           <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom out" disabled={!ready || zoom <= minZoom} onClick={() => changeZoom(-1)}>−</Button>
           <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom in" disabled={!ready || zoom >= maxZoom} onClick={() => changeZoom(1)}>+</Button>
         </div>
-      </div>
+      </div>}
       {renderControls?.(ready)}
       <div className="map-preview-stage">
         <div className="map-preview-canvas" ref={container} hidden={status === 'error'} />
@@ -729,13 +769,13 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
         </div>
         {status === 'error' && <Button className="map-preview-button map-preview-retry" onClick={retry}>Retry map</Button>}
       </div>
-      <div className="map-preview-map-meta">
+      {(presentation === 'specimen' || basemapStatus === 'error') && <div className="map-preview-map-meta">
         <p role="status">{basemapStatus === 'ready' ? 'Live basemap · OpenFreeMap'
           : basemapStatus === 'loading' ? 'Loading OpenFreeMap basemap…'
             : basemapStatus === 'error' ? 'Basemap unavailable · Showing map evidence only' : null}</p>
         {basemapStatus === 'error' && <Button className="map-preview-button" onClick={() => setBasemapAttempt((value) => value + 1)}>Retry basemap</Button>}
-      </div>
-      <p className="map-preview-help" id={descriptionId}>Drag or use arrow keys to pan. On touch, use two fingers. Use the map controls or + / − to zoom. Select a node to zoom in. Press Enter on the map to select a node or expand a cluster at the crosshair.{onClearSelection && ' Press Escape on the map to clear selection.'}</p>
+      </div>}
+      <p className={presentation === 'specimen' ? 'map-preview-help' : 'ks-visually-hidden'} id={descriptionId}>{instructions}</p>
       {ready && scene.clustered && !regional && (clusters.length > 0 || clusterError) && <div className="map-preview-clusters">
         {clusters.map(({ id, count, coordinates }, index) => <Button key={id} className="map-preview-button" onClick={(event) => { if (loadedMap) void expandCluster(loadedMap, id, coordinates, event.currentTarget) }}>
           Expand {clusters.length > 1 ? `cluster ${index + 1}` : 'cluster'} · {count} nodes
