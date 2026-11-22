@@ -23,6 +23,7 @@ export default function MapPage() {
   const packetsBody = useRef<HTMLDivElement>(null)
   const packetsHeader = useRef<HTMLElement>(null)
   const [collapsedHeight, setCollapsedHeight] = useState(48)
+  const [minimumPacketsHeight, setMinimumPacketsHeight] = useState<number | null>(null)
   const [clustered, setClustered] = useState(false)
   const selectedId = active.kind === 'node' ? active.id : null
   const [focusRequest, setFocusRequest] = useState(0)
@@ -52,6 +53,30 @@ export default function MapPage() {
     measure()
     return () => observer.disconnect()
   }, [])
+
+  useLayoutEffect(() => {
+    const header = packetsHeader.current
+    const body = packetsBody.current
+    const scroller = body?.querySelector<HTMLElement>('[data-packet-table-scroll]')
+    const tableHeader = scroller?.querySelector('thead')
+    if (!packetsOpen || !header || !body || !scroller || !tableHeader) return
+    const measure = () => {
+      const row = scroller.querySelector<HTMLElement>('[data-reception-id]')
+      if (!row || body.hidden || row.getBoundingClientRect().height === 0) return
+      const scrollbarHeight = scroller.offsetHeight - scroller.clientHeight
+      setMinimumPacketsHeight(Math.ceil(header.getBoundingClientRect().height
+        + tableHeader.getBoundingClientRect().height
+        + row.getBoundingClientRect().height + scrollbarHeight))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(header)
+    observer.observe(tableHeader)
+    observer.observe(scroller)
+    const row = scroller.querySelector('[data-reception-id]')
+    if (row) observer.observe(row)
+    measure()
+    return () => observer.disconnect()
+  }, [packetsOpen])
 
   function select(id: string) {
     setActive({ kind: 'node', id })
@@ -114,7 +139,7 @@ export default function MapPage() {
         </Collapsible>
       </ResizablePanel>
       <ResizableHandle className="map-workspace-resize" aria-label="Resize incoming packets"><span aria-hidden="true" /></ResizableHandle>
-      <ResizablePanel className="map-workspace-packets" id="incoming-packets" defaultSize={40} minSize={30} maxSize={75} collapsible collapsedSize={`${collapsedHeight}px`}>
+      <ResizablePanel className="map-workspace-packets" id="incoming-packets" defaultSize={40} minSize={minimumPacketsHeight === null ? undefined : `${minimumPacketsHeight}px`} maxSize={75} collapsible collapsedSize={`${collapsedHeight}px`}>
         <header className="map-workspace-packet-header" ref={packetsHeader}>
           <Button className="map-preview-button map-workspace-packet-toggle" ref={packetsToggle} aria-label={packetsOpen ? 'Hide packets' : 'Show packets'} aria-expanded={packetsOpen} aria-controls="incoming-packets-body"
             onClick={() => {

@@ -642,6 +642,75 @@ test('packet toggle is a centered ghost chevron when open and closed with keyboa
   }
 })
 
+test('packet dock shrinks to one reception row before snapping closed and restores its size', async () => {
+  for (const width of [1440, 320]) {
+    for (const fontSize of [16, 24]) {
+      await withMap({ viewport: { width, height: 900 }, ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
+        await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px` }, fontSize)
+        const pane = page.locator('.map-workspace-packets')
+        const handle = page.getByRole('separator', { name: 'Resize incoming packets', exact: true })
+        const expected = await pane.evaluate(node => {
+          const scroller = node.querySelector('[data-packet-table-scroll]')
+          const row = scroller.querySelector('[data-reception-id]')
+          return { collapsed: node.querySelector('.map-workspace-packet-header').getBoundingClientRect().height,
+            minimum: node.querySelector('.map-workspace-packet-header').getBoundingClientRect().height
+              + scroller.querySelector('thead').getBoundingClientRect().height
+              + row.getBoundingClientRect().height + scroller.offsetHeight - scroller.clientHeight }
+        })
+        const resizeTo = async height => {
+          const grip = await handle.boundingBox()
+          const current = await pane.boundingBox()
+          const x = grip.x + grip.width / 2
+          const y = grip.y + grip.height / 2
+          const target = y + current.height - height
+          if (width < 500) {
+            const session = await page.context().newCDPSession(page)
+            await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+            await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: target }] })
+            await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await session.detach()
+          } else {
+            await page.mouse.move(x, y)
+            await page.mouse.down()
+            await page.mouse.move(x, target, { steps: 6 })
+            await page.mouse.up()
+          }
+        }
+        await resizeTo(expected.minimum - 2)
+        assert.equal(await pane.getAttribute('data-collapsed'), null)
+        const minimum = await pane.boundingBox()
+        assert.ok(Math.abs(minimum.height - expected.minimum) < 2, JSON.stringify({ width, fontSize, expected, minimum }))
+        const scroller = pane.locator('[data-packet-table-scroll]')
+        const capacity = await scroller.evaluate(node => {
+          const row = node.querySelector('[data-reception-id]')
+          const header = node.querySelector('thead').getBoundingClientRect()
+          const rowBounds = row.getBoundingClientRect()
+          const visibleBody = node.clientHeight - header.height
+          node.scrollTop += rowBounds.y - header.bottom
+          return { visibleBody, rowHeight: rowBounds.height }
+        })
+        assert.ok(Math.abs(capacity.visibleBody - capacity.rowHeight) < 2, 'table body has space for exactly one row, not a status row plus a reception')
+        const row = await pane.locator('[data-reception-id]').first().boundingBox()
+        assert.ok(row.y + row.height <= minimum.y + minimum.height + 1, 'one reception fits after scrolling past the feed-status marker')
+        await resizeTo((expected.minimum + expected.collapsed) / 2 - 5)
+        assert.notEqual(await pane.getAttribute('data-collapsed'), null)
+        assert.ok(Math.abs((await pane.boundingBox()).height - expected.collapsed) < 2)
+        await page.getByRole('button', { name: 'Show packets', exact: true }).click()
+        assert.ok(Math.abs((await pane.boundingBox()).height - minimum.height) < 2, 'reopening restores the one-row size')
+        await handle.focus()
+        await page.keyboard.press('ArrowUp')
+        const enlarged = await pane.boundingBox()
+        assert.ok(enlarged.height > minimum.height)
+        await page.keyboard.press('Enter')
+        assert.notEqual(await pane.getAttribute('data-collapsed'), null)
+        await page.keyboard.press('Enter')
+        assert.ok(Math.abs((await pane.boundingBox()).height - enlarged.height) < 2)
+        assert.equal(await page.evaluate(() => document.documentElement.scrollHeight), 900)
+      })
+    }
+  }
+})
+
 test('ready workspace omits metadata chrome and collapsed packets fit their header', async () => {
   for (const width of [1440, 320]) {
     await withMap({ viewport: { width, height: 900 }, ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
