@@ -450,6 +450,13 @@ test('settings use an icon rail and concise nonmodal panel that follows the pack
   for (const width of [1440, 320]) {
     await withMap({ viewport: { width, height: 900 }, ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
       const settings = page.getByRole('button', { name: 'Map settings', exact: true })
+      const layers = page.getByRole('button', { name: 'Map layers', exact: true })
+      assert.ok(await layers.isEnabled(), 'layers opens a panel even while its source is unavailable')
+      assert.equal(await layers.innerText(), '', 'layers uses an accessible icon-only button')
+      const layersBounds = await layers.boundingBox()
+      const settingsBounds = await settings.boundingBox()
+      assert.ok(layersBounds.y + layersBounds.height <= settingsBounds.y, 'layers sits above settings')
+      assert.ok(Math.abs(layersBounds.x - settingsBounds.x) < 1)
       const zoomIn = page.getByRole('button', { name: 'Zoom in', exact: true })
       const zoomOut = page.getByRole('button', { name: 'Zoom out', exact: true })
       const fit = page.getByRole('button', { name: 'Fit all nodes', exact: true })
@@ -467,8 +474,23 @@ test('settings use an icon rail and concise nonmodal panel that follows the pack
       const panel = page.getByRole('region', { name: 'Map settings', exact: true })
       await panel.waitFor()
       assert.equal(await settings.getAttribute('aria-expanded'), 'true')
+      const panelControls = await panel.getByRole('radio').evaluateAll(nodes => nodes.map(node => {
+        const bounds = node.getBoundingClientRect()
+        const group = node.closest('[role="radiogroup"]').getBoundingClientRect()
+        return { name: node.textContent, width: bounds.width, groupWidth: group.width, clipped: node.scrollWidth > node.clientWidth }
+      }))
+      assert.ok(panelControls.every(control => control.width >= control.groupWidth * 0.4 && !control.clipped),
+        `panel choices must fill their segments without clipped labels: ${JSON.stringify(panelControls)}`)
       assert.equal(await page.getByRole('dialog').count(), 0)
       assert.equal((await panel.innerText()).toLowerCase().replace(/\s+/g, ' '), 'map settings map theme light dark clustering on off')
+      const labelTypography = await panel.locator('legend').evaluateAll(nodes => nodes.map(node => {
+        const style = getComputedStyle(node)
+        return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight,
+          transform: style.textTransform, spacing: style.letterSpacing }
+      }))
+      const expectedLabel = await page.evaluate(() => ({ family: getComputedStyle(document.documentElement).getPropertyValue('--ks-sans').trim() }))
+      assert.ok(labelTypography.every(style => style.transform === 'none' && style.spacing === 'normal' && style.weight === '400'
+        && style.size === '12px' && style.family === expectedLabel.family), JSON.stringify(labelTypography))
       assert.equal(await panel.getByRole('button', { name: 'Fit all nodes', exact: true }).count(), 0)
       const nodes = page.getByRole('region', { name: "What's active", exact: true })
       assert.equal(await nodes.isVisible(), width >= 768, 'desktop keeps both panels; mobile shows one at a time')
@@ -489,6 +511,14 @@ test('settings use an icon rail and concise nonmodal panel that follows the pack
       assert.ok((await panel.boundingBox()).height < initialHeight)
       await assertPanelBounds()
       await page.evaluate(() => { document.documentElement.style.fontSize = '24px' })
+      const readableChoices = await panel.getByRole('radio').evaluateAll(nodes => nodes.map(node => {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        const text = range.getBoundingClientRect()
+        const bounds = node.getBoundingClientRect()
+        return text.width <= bounds.width && text.height <= parseFloat(getComputedStyle(node).lineHeight) + 1
+      }))
+      assert.ok(readableChoices.every(Boolean), 'enlarged mobile labels remain single-line within their controls')
       const body = panel.locator('.map-preview-settings-body')
       assert.ok(await body.evaluate(node => node.scrollHeight > node.clientHeight), 'short settings body scrolls internally at enlarged text')
       await panel.getByRole('radio', { name: 'Off', exact: true }).focus()
@@ -521,16 +551,67 @@ test('settings use an icon rail and concise nonmodal panel that follows the pack
   }
 })
 
+test('layers opens a panel with a disabled MeshMapper control and coordinates with other panels', async () => {
+  for (const width of [1440, 320]) {
+    await withMap({ viewport: { width, height: 900 }, ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
+      const layers = page.getByRole('button', { name: 'Map layers', exact: true })
+      const settings = page.getByRole('button', { name: 'Map settings', exact: true })
+      const panel = page.getByRole('region', { name: 'Map layers', exact: true })
+      const settingsPanel = page.getByRole('region', { name: 'Map settings', exact: true })
+      const nodes = page.getByRole('region', { name: "What's active", exact: true })
+      await layers.press('Enter')
+      await panel.waitFor()
+      assert.equal(await layers.getAttribute('aria-expanded'), 'true')
+      assert.equal((await panel.innerText()).replace(/\s+/g, ' '), 'Map layers MeshMapper')
+      const meshMapper = panel.getByRole('switch', { name: 'MeshMapper', exact: true })
+      assert.ok(await meshMapper.isDisabled())
+      assert.equal(await meshMapper.getAttribute('aria-checked'), 'false')
+      await meshMapper.dispatchEvent('click')
+      assert.equal(await meshMapper.getAttribute('aria-checked'), 'false', 'disabled control cannot enable a layer')
+      assert.equal(await nodes.isVisible(), width >= 768)
+      const bounds = await panel.boundingBox()
+      const view = await page.locator('.map-preview-stage').boundingBox()
+      assert.ok(Math.abs(bounds.height - view.height + 16) < 2)
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width)
+      await page.keyboard.press('Escape')
+      await panel.waitFor({ state: 'hidden' })
+      assert.ok(await layers.evaluate(node => node === document.activeElement))
+      await layers.click()
+      await panel.getByRole('button', { name: 'Close map layers', exact: true }).click()
+      assert.ok(await layers.evaluate(node => node === document.activeElement))
+      await settings.click()
+      await layers.click()
+      assert.equal(await settingsPanel.isVisible(), false)
+      assert.ok(await panel.isVisible())
+      await settings.click()
+      assert.equal(await panel.isVisible(), false)
+      assert.ok(await settingsPanel.isVisible())
+      await layers.click()
+      if (width < 500) {
+        await page.getByRole('button', { name: 'Show nodes', exact: true }).click()
+        assert.equal(await panel.isVisible(), false)
+        assert.ok(await nodes.isVisible())
+      } else {
+        await page.setViewportSize({ width: 600, height: 900 })
+        await nodes.waitFor({ state: 'hidden' })
+        assert.ok(await panel.isVisible())
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollHeight), 900)
+    })
+  }
+})
+
 test('rail actions remain fully reachable with enlarged touch text and maximum packet height', async () => {
   await withMap({ viewport: { width: 320, height: 900 }, isMobile: true, hasTouch: true }, async page => {
     await page.evaluate(() => { document.documentElement.style.fontSize = '24px' })
     const handle = page.getByRole('separator', { name: 'Resize incoming packets', exact: true })
-    for (const state of ['closed', 'settings', 'nodes']) {
+    for (const state of ['closed', 'settings', 'layers', 'nodes']) {
       if (state === 'settings') await page.getByRole('button', { name: 'Map settings', exact: true }).click()
+      if (state === 'layers') await page.getByRole('button', { name: 'Map layers', exact: true }).click()
       if (state === 'nodes') await page.getByRole('button', { name: 'Show nodes', exact: true }).click()
       await handle.focus()
       await page.keyboard.press('Home')
-      for (const name of ['Map settings', 'Zoom in', 'Zoom out', 'Fit all nodes']) {
+      for (const name of ['Map layers', 'Map settings', 'Zoom in', 'Zoom out', 'Fit all nodes']) {
         const control = page.getByRole('button', { name, exact: true })
         await control.focus()
         const visible = await control.evaluate(node => {
@@ -953,6 +1034,15 @@ test('SDK agents can discover and operate the map workspace controls', async () 
     assert.equal(settingsResult.ok, true, settingsResult.error)
     await page.waitForFunction(() => document.querySelector('.map-preview')?.getAttribute('data-map-theme') === 'dark')
     assert.equal(await page.getByRole('radiogroup', { name: 'Clustering', exact: true }).getByRole('radio', { name: 'On', exact: true }).getAttribute('aria-checked'), 'true')
+    await page.getByRole('button', { name: 'Map layers', exact: true }).click()
+    const layerControls = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const controls = agent.snapshot().filter(entry => !entry.offPage && entry.component !== 'more')
+      return { unnamed: controls.filter(entry => !entry.label).map(entry => entry.component),
+        meshMapper: controls.find(entry => entry.label === 'MeshMapper')?.component }
+    })
+    assert.deepEqual(layerControls.unnamed, [])
+    assert.equal(layerControls.meshMapper, 'switch')
   }, async page => {
     await page.route(`${origin}/map?mapDiagnostics`, async route => {
       const response = await route.fetch()

@@ -17,6 +17,7 @@ const example = mapCatalogue.nodes.find(({ id }) => id === 'regional-nodes')!
 export default function MapPage() {
   const [nodesOpen, setNodesOpen] = useState(() => matchMedia('(min-width: 48rem)').matches)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(false)
   const [active, setActive] = useState<ActiveMapContext>({ kind: 'visible' })
   const [packetsOpen, setPacketsOpen] = useState(true)
   const [panels] = useState(createResizableController)
@@ -35,7 +36,10 @@ export default function MapPage() {
   const scene = useMemo(() => ({ ...example.scene, clustered }), [clustered])
 
   function changeNodesOpen(open: boolean) {
-    if (open && matchMedia('(max-width: 47.99rem)').matches) setSettingsOpen(false)
+    if (open && matchMedia('(max-width: 47.99rem)').matches) {
+      setSettingsOpen(false)
+      setLayersOpen(false)
+    }
     setNodesOpen(open)
   }
 
@@ -44,13 +48,18 @@ export default function MapPage() {
     setSettingsOpen(open)
   }
 
+  function changeLayersOpen(open: boolean) {
+    if (open && matchMedia('(max-width: 47.99rem)').matches) setNodesOpen(false)
+    setLayersOpen(open)
+  }
+
   useLayoutEffect(() => {
     const narrow = matchMedia('(max-width: 47.99rem)')
-    const adaptPanels = () => { if (narrow.matches && settingsOpen) setNodesOpen(false) }
+    const adaptPanels = () => { if (narrow.matches && (settingsOpen || layersOpen)) setNodesOpen(false) }
     narrow.addEventListener('change', adaptPanels)
     adaptPanels()
     return () => narrow.removeEventListener('change', adaptPanels)
-  }, [settingsOpen])
+  }, [settingsOpen, layersOpen])
 
   const measureNodesHeader = useCallback((header: HTMLElement | null) => {
     const panel = header?.closest<HTMLElement>('.map-workspace-nodes')
@@ -168,6 +177,7 @@ export default function MapPage() {
       <ResizablePanel className="map-workspace-view" ref={mapView} defaultSize={60} minSize={minimumMapHeight === null ? 25 : `${minimumMapHeight}px`}>
         <MapPreview presentation="workspace" sceneId={example.id} label="Regional fixture map" center={mapShowcaseCenter}
           settingsOpen={settingsOpen} onSettingsOpenChange={changeSettingsOpen}
+          layersOpen={layersOpen} onLayersOpenChange={changeLayersOpen}
           scene={scene} selectedId={selectedId} focusRequest={focusRequest} regional
           onPick={pick} onClearSelection={clearSelection} onClusterToggle={setClustered} onViewportNodesChange={setViewportNodes} />
         <Collapsible className="map-workspace-nodes" open={nodesOpen} onOpenChange={changeNodesOpen}>

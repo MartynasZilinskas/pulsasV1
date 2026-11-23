@@ -41,6 +41,8 @@ type MapPreviewProps = {
   presentation?: 'specimen' | 'workspace'
   settingsOpen?: boolean
   onSettingsOpenChange?: (open: boolean) => void
+  layersOpen?: boolean
+  onLayersOpenChange?: (open: boolean) => void
 }
 
 function renderedIds(features: readonly MapGeoJSONFeature[]): string[] {
@@ -115,7 +117,7 @@ function frameDiagnosticsEnabled() {
   return new URLSearchParams(window.location.search).has('mapDiagnostics')
 }
 
-export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls, presentation = 'specimen', settingsOpen, onSettingsOpenChange }: MapPreviewProps) {
+export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls, presentation = 'specimen', settingsOpen, onSettingsOpenChange, layersOpen, onLayersOpenChange }: MapPreviewProps) {
   const container = useRef<HTMLDivElement>(null)
   const artwork = useRef<HTMLDivElement>(null)
   const framing = useRef<{ map: MapLibre; sceneId: string } | null>(null)
@@ -126,6 +128,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const descriptionId = useId()
   const [attempt, setAttempt] = useState(0)
   const [localSettingsOpen, setLocalSettingsOpen] = useState(false)
+  const [localLayersOpen, setLocalLayersOpen] = useState(false)
   const [loadedPreview, setLoadedPreview] = useState<{ map: MapLibre; roleColors: PreviewRoleColors } | null>(null)
   const loadedMap = loadedPreview?.map ?? null
   const roleColors = loadedPreview?.roleColors
@@ -739,7 +742,15 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
         {previewRoles.map((role) => <span key={role} data-tone={nodeRoles[role].tone}><NodeRoleIcon role={role} /></span>)}
       </div>
       {presentation === 'specimen' ? <div className="map-preview-toolbar">{controls}</div> : <MapWorkspaceControls
-        open={settingsOpen ?? localSettingsOpen} onOpenChange={onSettingsOpenChange ?? setLocalSettingsOpen}
+        open={settingsOpen ?? localSettingsOpen} onOpenChange={open => {
+          if (open) (onLayersOpenChange ?? setLocalLayersOpen)(false)
+          const change = onSettingsOpenChange ?? setLocalSettingsOpen
+          change(open)
+        }} layersOpen={layersOpen ?? localLayersOpen} onLayersOpenChange={open => {
+          if (open) (onSettingsOpenChange ?? setLocalSettingsOpen)(false)
+          const change = onLayersOpenChange ?? setLocalLayersOpen
+          change(open)
+        }}
         theme={theme} onThemeChange={setTheme} clustered={scene.clustered ?? false} onClusterChange={onClusterToggle}
         ready={ready} canZoomIn={zoom < maxZoom} canZoomOut={zoom > minZoom} onZoom={changeZoom}
         onFit={() => { if (loadedMap) fitScene(loadedMap, scene, center, selectedId) }} />}
