@@ -56,8 +56,8 @@ test('map route uses the full viewport and a real map in both application themes
       assert.equal(await page.locator('.map-preview').getAttribute('data-map-theme'), colorScheme)
       assert.doesNotMatch(await page.getByRole('main').innerText(), /Live packets/)
       await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
-      await page.getByRole('button', { name: 'Map settings', exact: true }).click()
       await page.getByRole('button', { name: 'Fit all nodes', exact: true }).click()
+      assert.equal(await page.getByRole('region', { name: 'Map settings', exact: true }).count(), 0, 'fit is available without opening settings')
     })
   }
 })
@@ -353,7 +353,7 @@ test('active panel switches from visible nodes to node overview and back on desk
 test('actual clustered map clicks list the complete cluster and individual map clicks show node overview', async () => {
   await withMap({ viewport: { width: 1440, height: 1000 } }, async page => {
     await page.getByRole('button', { name: 'Map settings', exact: true }).click()
-    await page.getByRole('button', { name: 'Clustering', exact: true }).click()
+    await page.getByRole('radiogroup', { name: 'Clustering', exact: true }).getByRole('radio', { name: 'On', exact: true }).click()
     await page.keyboard.press('Escape')
     await page.evaluate(() => new Promise(resolve => {
       const map = window.workspaceMap
@@ -374,7 +374,7 @@ test('actual clustered map clicks list the complete cluster and individual map c
     assert.ok(await page.getByRole('region', { name: "What's active", exact: true }).getByRole('heading', { level: 2 }).evaluate(element => element === document.activeElement), 'selection moves focus to the context heading rather than a detached list')
     await page.getByRole('button', { name: 'Clear selection', exact: true }).click()
     await page.getByRole('button', { name: 'Map settings', exact: true }).click()
-    await page.getByRole('button', { name: 'Clustering', exact: true }).click()
+    await page.getByRole('radiogroup', { name: 'Clustering', exact: true }).getByRole('radio', { name: 'Off', exact: true }).click()
     await page.keyboard.press('Escape')
     await page.evaluate(() => new Promise(resolve => {
       const map = window.workspaceMap
@@ -407,16 +407,142 @@ test('workspace settings preserve map controls and shell theme sync', async () =
   await withMap({ viewport: { width: 1024, height: 900 }, colorScheme: 'light' }, async page => {
     const settings = page.getByRole('button', { name: 'Map settings', exact: true })
     await settings.press('Enter')
-    const clusters = page.getByRole('button', { name: 'Clustering', exact: true })
-    assert.equal(await clusters.getAttribute('aria-pressed'), 'false')
-    await clusters.press('Space')
-    assert.equal(await clusters.getAttribute('aria-pressed'), 'true')
-    await clusters.press('Space')
+    const clusters = page.getByRole('radiogroup', { name: 'Clustering', exact: true })
+    assert.equal(await clusters.getByRole('radio', { name: 'Off', exact: true }).getAttribute('aria-checked'), 'true')
+    await clusters.getByRole('radio', { name: 'On', exact: true }).press('Space')
+    assert.equal(await clusters.getByRole('radio', { name: 'On', exact: true }).getAttribute('aria-checked'), 'true')
+    await clusters.getByRole('radio', { name: 'Off', exact: true }).press('Space')
+    const themes = page.getByRole('radiogroup', { name: 'Map theme', exact: true })
+    await themes.getByRole('radio', { name: 'Dark', exact: true }).press('Space')
+    await page.waitForFunction(() => document.querySelector('.map-preview')?.getAttribute('data-map-theme') === 'dark')
+    await themes.getByRole('radio', { name: 'Light', exact: true }).press('Space')
+    await page.waitForFunction(() => document.querySelector('.map-preview')?.getAttribute('data-map-theme') === 'light')
+    const initialZoom = await page.evaluate(() => window.renderedMap.zoom)
+    await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
+    await page.waitForFunction(zoom => window.renderedMap.zoom >= zoom + 0.9, initialZoom)
+    await page.getByRole('button', { name: 'Zoom out', exact: true }).click()
+    await page.waitForFunction(zoom => Math.abs(window.renderedMap.zoom - zoom) < 0.05, initialZoom)
+    await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
+    await page.waitForFunction(zoom => window.renderedMap.zoom >= zoom + 0.9, initialZoom)
+    const beforeFit = await page.evaluate(() => window.renderedMap.zoom)
+    await page.getByRole('button', { name: 'Fit all nodes', exact: true }).click()
+    await page.waitForFunction(zoom => window.renderedMap.zoom < zoom - 0.5, beforeFit)
+    assert.ok(await page.evaluate(() => {
+      const map = window.workspaceMap
+      const bounds = map.getBounds()
+      return map.getSource('markers').serialize().data.features.every(feature => bounds.contains(feature.geometry.coordinates))
+    }), 'Fit all nodes frames the complete regional fixture')
+    await themes.getByRole('radio', { name: 'Light', exact: true }).focus()
     await page.keyboard.press('Escape')
     assert.ok(await settings.evaluate(node => node === document.activeElement))
     await page.getByRole('combobox', { name: 'Appearance', exact: true }).click()
     await page.getByRole('option', { name: 'Dark', exact: true }).click()
     await page.waitForFunction(() => document.querySelector('.map-preview')?.getAttribute('data-map-theme') === 'dark')
+  }, async page => {
+    await page.route(/\/src\/components\/map\/map-preview\.tsx(?:\?.*)?$/, async route => {
+      const response = await route.fetch()
+      await route.fulfill({ response, body: (await response.text()).replace('map = new MapLibre(', 'map = window.workspaceMap = new MapLibre(') })
+    })
+  })
+})
+
+test('settings use an icon rail and concise nonmodal panel that follows the packet dock', async () => {
+  for (const width of [1440, 320]) {
+    await withMap({ viewport: { width, height: 900 }, ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
+      const settings = page.getByRole('button', { name: 'Map settings', exact: true })
+      const zoomIn = page.getByRole('button', { name: 'Zoom in', exact: true })
+      const zoomOut = page.getByRole('button', { name: 'Zoom out', exact: true })
+      const fit = page.getByRole('button', { name: 'Fit all nodes', exact: true })
+      const rail = await Promise.all([settings, zoomIn, zoomOut, fit].map(control => control.boundingBox()))
+      assert.ok(rail[0].y + rail[0].height <= rail[1].y && rail[1].y + rail[1].height <= rail[2].y + 1)
+      assert.ok(rail[2].y + rail[2].height < rail[3].y, 'fit is a separate action below the zoom pair')
+      assert.ok(rail.every(box => Math.abs(box.x - rail[0].x) < 1), 'settings, zoom and fit share a vertical axis')
+      assert.equal(await settings.innerText(), '', 'settings trigger is icon-only')
+      assert.equal(await fit.innerText(), '', 'fit uses an icon with an accessible name')
+      await fit.click()
+      assert.ok(await zoomIn.isEnabled())
+      assert.ok(await zoomOut.isEnabled())
+      if (width < 500) assert.ok(rail.every(box => box.width >= 44 && box.height >= 44))
+      await settings.click()
+      const panel = page.getByRole('region', { name: 'Map settings', exact: true })
+      await panel.waitFor()
+      assert.equal(await settings.getAttribute('aria-expanded'), 'true')
+      assert.equal(await page.getByRole('dialog').count(), 0)
+      assert.equal((await panel.innerText()).toLowerCase().replace(/\s+/g, ' '), 'map settings map theme light dark clustering on off')
+      assert.equal(await panel.getByRole('button', { name: 'Fit all nodes', exact: true }).count(), 0)
+      const nodes = page.getByRole('region', { name: "What's active", exact: true })
+      assert.equal(await nodes.isVisible(), width >= 768, 'desktop keeps both panels; mobile shows one at a time')
+      const assertPanelBounds = async () => {
+        const bounds = await panel.boundingBox()
+        const view = await page.locator('.map-preview-stage').boundingBox()
+        assert.ok(Math.abs(bounds.y - view.y - 8) < 2)
+        assert.ok(Math.abs(bounds.y + bounds.height - (view.y + view.height - 8)) < 2, 'settings fills available map height')
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width)
+        assert.equal(await page.evaluate(() => document.documentElement.scrollHeight), 900)
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
+      }
+      await assertPanelBounds()
+      const initialHeight = (await panel.boundingBox()).height
+      const handle = page.getByRole('separator', { name: 'Resize incoming packets', exact: true })
+      await handle.focus()
+      await page.keyboard.press('Home')
+      assert.ok((await panel.boundingBox()).height < initialHeight)
+      await assertPanelBounds()
+      await page.evaluate(() => { document.documentElement.style.fontSize = '24px' })
+      const body = panel.locator('.map-preview-settings-body')
+      assert.ok(await body.evaluate(node => node.scrollHeight > node.clientHeight), 'short settings body scrolls internally at enlarged text')
+      await panel.getByRole('radio', { name: 'Off', exact: true }).focus()
+      await page.keyboard.press('Escape')
+      await panel.waitFor({ state: 'hidden' })
+      assert.ok(await settings.evaluate(node => node === document.activeElement))
+      await page.evaluate(() => { document.documentElement.style.fontSize = '' })
+      await settings.press('Enter')
+      await panel.getByRole('button', { name: 'Close map settings', exact: true }).click()
+      assert.ok(await settings.evaluate(node => node === document.activeElement))
+      await settings.click()
+      const canvas = page.locator('.maplibregl-canvas')
+      await canvas.click({ position: { x: 3, y: (await canvas.boundingBox()).height / 2 } })
+      assert.ok(await panel.isVisible(), 'nonmodal settings does not dismiss on map interaction')
+      if (width < 500) {
+        await page.getByRole('button', { name: 'Show nodes', exact: true }).click()
+        assert.equal(await panel.isVisible(), false)
+        assert.ok(await nodes.isVisible())
+        await settings.click()
+        await page.getByRole('table', { name: 'Packet receptions' }).locator('tr[data-reception-id]').first().locator('td').first().click()
+        assert.equal(await panel.isVisible(), false)
+        await nodes.getByRole('region', { name: 'Packet overview', exact: true }).waitFor()
+      } else {
+        await page.setViewportSize({ width: 600, height: 900 })
+        await nodes.waitFor({ state: 'hidden' })
+        assert.equal(await nodes.isVisible(), false, 'resizing narrow resolves simultaneous panels')
+        assert.ok(await panel.isVisible())
+      }
+    })
+  }
+})
+
+test('rail actions remain fully reachable with enlarged touch text and maximum packet height', async () => {
+  await withMap({ viewport: { width: 320, height: 900 }, isMobile: true, hasTouch: true }, async page => {
+    await page.evaluate(() => { document.documentElement.style.fontSize = '24px' })
+    const handle = page.getByRole('separator', { name: 'Resize incoming packets', exact: true })
+    for (const state of ['closed', 'settings', 'nodes']) {
+      if (state === 'settings') await page.getByRole('button', { name: 'Map settings', exact: true }).click()
+      if (state === 'nodes') await page.getByRole('button', { name: 'Show nodes', exact: true }).click()
+      await handle.focus()
+      await page.keyboard.press('Home')
+      for (const name of ['Map settings', 'Zoom in', 'Zoom out', 'Fit all nodes']) {
+        const control = page.getByRole('button', { name, exact: true })
+        await control.focus()
+        const visible = await control.evaluate(node => {
+          const bounds = node.getBoundingClientRect()
+          const rail = node.closest('.map-preview-workspace-rail').getBoundingClientRect()
+          return bounds.top >= rail.top - 1 && bounds.bottom <= rail.bottom + 1 && bounds.height >= 44
+        })
+        assert.ok(visible, `${name} is fully exposed in ${state} state`)
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollHeight), 900)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
+    }
   })
 })
 
@@ -805,6 +931,28 @@ test('SDK agents can discover and operate the map workspace controls', async () 
     assert.equal(result.ok, true, result.error)
     assert.ok(result.resize, 'resize handle is exposed to the SDK agent')
     await page.getByRole('option', { name: /Klaipėda 0001/ }).waitFor()
+    await page.getByRole('button', { name: 'Map settings', exact: true }).click()
+    const settingsResult = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const controls = agent.snapshot().filter(entry => !entry.offPage && entry.component !== 'more')
+      const required = ['Map settings', 'Close map settings', 'Map theme', 'Clustering', 'Fit all nodes', 'Zoom in', 'Zoom out']
+      const missing = required.filter(label => !controls.some(entry => entry.label === label))
+      const steps = [
+        { label: 'Map theme', action: 'setValue', args: ['dark'] },
+        { label: 'Clustering', action: 'setValue', args: ['on'] },
+        { label: 'Zoom in', action: 'press' },
+        { label: 'Zoom out', action: 'press' },
+        { label: 'Fit all nodes', action: 'press' },
+      ].map(({ label, ...step }) => ({ ref: controls.find(entry => entry.label === label)?.ref, ...step }))
+      const changed = missing.length ? null : await agent.act({ steps })
+      return { missing, unnamed: controls.filter(entry => !entry.label).map(entry => entry.component),
+        ok: changed?.ok, error: changed?.error?.message }
+    })
+    assert.deepEqual(settingsResult.missing, [])
+    assert.deepEqual(settingsResult.unnamed, [])
+    assert.equal(settingsResult.ok, true, settingsResult.error)
+    await page.waitForFunction(() => document.querySelector('.map-preview')?.getAttribute('data-map-theme') === 'dark')
+    assert.equal(await page.getByRole('radiogroup', { name: 'Clustering', exact: true }).getByRole('radio', { name: 'On', exact: true }).getAttribute('aria-checked'), 'true')
   }, async page => {
     await page.route(`${origin}/map?mapDiagnostics`, async route => {
       const response = await route.fetch()

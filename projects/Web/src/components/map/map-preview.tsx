@@ -1,6 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { Radio, RadioGroup } from '@ui-sdk/react/radio'
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
+import { MapWorkspaceControls } from './map-workspace-controls'
 import { MapOverlap } from './map-overlap-view'
 import { screenOverlaps, type ScreenOverlap } from './map-overlap'
 import { LngLatBounds, Map as MapLibre, Popup, type GeoJSONSource, type MapGeoJSONFeature } from 'maplibre-gl'
@@ -39,6 +39,8 @@ type MapPreviewProps = {
   flow?: PreviewFlowInput; playback?: FlowPlayback | null; onFlowFinish?: () => void
   renderControls?: (ready: boolean) => ReactNode
   presentation?: 'specimen' | 'workspace'
+  settingsOpen?: boolean
+  onSettingsOpenChange?: (open: boolean) => void
 }
 
 function renderedIds(features: readonly MapGeoJSONFeature[]): string[] {
@@ -113,7 +115,7 @@ function frameDiagnosticsEnabled() {
   return new URLSearchParams(window.location.search).has('mapDiagnostics')
 }
 
-export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls, presentation = 'specimen' }: MapPreviewProps) {
+export function MapPreview({ sceneId, label, center, scene, selectedId, focusRequest, regional = false, onPick, onClearSelection, onClusterToggle, onViewportNodesChange, flow, playback, onFlowFinish, renderControls, presentation = 'specimen', settingsOpen, onSettingsOpenChange }: MapPreviewProps) {
   const container = useRef<HTMLDivElement>(null)
   const artwork = useRef<HTMLDivElement>(null)
   const framing = useRef<{ map: MapLibre; sceneId: string } | null>(null)
@@ -123,6 +125,7 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
   const zoomTarget = useRef<number | null>(null)
   const descriptionId = useId()
   const [attempt, setAttempt] = useState(0)
+  const [localSettingsOpen, setLocalSettingsOpen] = useState(false)
   const [loadedPreview, setLoadedPreview] = useState<{ map: MapLibre; roleColors: PreviewRoleColors } | null>(null)
   const loadedMap = loadedPreview?.map ?? null
   const roleColors = loadedPreview?.roleColors
@@ -735,26 +738,11 @@ export function MapPreview({ sceneId, label, center, scene, selectedId, focusReq
       <div hidden ref={artwork}>
         {previewRoles.map((role) => <span key={role} data-tone={nodeRoles[role].tone}><NodeRoleIcon role={role} /></span>)}
       </div>
-      {presentation === 'specimen' ? <div className="map-preview-toolbar">{controls}</div> : <div className="map-preview-workspace-controls">
-        <Popover>
-          <PopoverTrigger className="map-preview-button" aria-label="Map settings">
-            <span className="map-preview-settings-label">Map settings</span>
-            <svg className="map-preview-settings-icon" aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M3 5h14M3 10h14M3 15h14" />
-              <path d="M7 3v4m6 1v4m-6 1v4" strokeWidth="3" />
-            </svg>
-          </PopoverTrigger>
-          <PopoverContent className="map-preview-settings" align="end" sideOffset={6} collisionPadding={8}>
-            <PopoverTitle>Map settings</PopoverTitle>
-            <div className="map-preview-toolbar">{controls}</div>
-            <p className="map-preview-help">{instructions}</p>
-          </PopoverContent>
-        </Popover>
-        <div className="map-preview-control-pair">
-          <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom out" disabled={!ready || zoom <= minZoom} onClick={() => changeZoom(-1)}>−</Button>
-          <Button className="map-preview-button map-preview-zoom-button" aria-label="Zoom in" disabled={!ready || zoom >= maxZoom} onClick={() => changeZoom(1)}>+</Button>
-        </div>
-      </div>}
+      {presentation === 'specimen' ? <div className="map-preview-toolbar">{controls}</div> : <MapWorkspaceControls
+        open={settingsOpen ?? localSettingsOpen} onOpenChange={onSettingsOpenChange ?? setLocalSettingsOpen}
+        theme={theme} onThemeChange={setTheme} clustered={scene.clustered ?? false} onClusterChange={onClusterToggle}
+        ready={ready} canZoomIn={zoom < maxZoom} canZoomOut={zoom > minZoom} onZoom={changeZoom}
+        onFit={() => { if (loadedMap) fitScene(loadedMap, scene, center, selectedId) }} />}
       {renderControls?.(ready)}
       <div className="map-preview-stage">
         <div className="map-preview-canvas" ref={container} hidden={status === 'error'} />

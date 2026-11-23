@@ -16,20 +16,41 @@ const example = mapCatalogue.nodes.find(({ id }) => id === 'regional-nodes')!
 
 export default function MapPage() {
   const [nodesOpen, setNodesOpen] = useState(() => matchMedia('(min-width: 48rem)').matches)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [active, setActive] = useState<ActiveMapContext>({ kind: 'visible' })
   const [packetsOpen, setPacketsOpen] = useState(true)
   const [panels] = useState(createResizableController)
   const packetsToggle = useRef<HTMLButtonElement>(null)
   const packetsBody = useRef<HTMLDivElement>(null)
   const packetsHeader = useRef<HTMLElement>(null)
+  const mapView = useRef<HTMLDivElement>(null)
   const [collapsedHeight, setCollapsedHeight] = useState(48)
   const [minimumPacketsHeight, setMinimumPacketsHeight] = useState<number | null>(null)
+  const [minimumMapHeight, setMinimumMapHeight] = useState<number | null>(null)
   const [clustered, setClustered] = useState(false)
   const selectedId = active.kind === 'node' ? active.id : null
   const [focusRequest, setFocusRequest] = useState(0)
   const [viewportNodes, setViewportNodes] = useState<readonly string[] | null>(null)
   const overlapOrigin = useRef<HTMLCanvasElement | null>(null)
   const scene = useMemo(() => ({ ...example.scene, clustered }), [clustered])
+
+  function changeNodesOpen(open: boolean) {
+    if (open && matchMedia('(max-width: 47.99rem)').matches) setSettingsOpen(false)
+    setNodesOpen(open)
+  }
+
+  function changeSettingsOpen(open: boolean) {
+    if (open && matchMedia('(max-width: 47.99rem)').matches) setNodesOpen(false)
+    setSettingsOpen(open)
+  }
+
+  useLayoutEffect(() => {
+    const narrow = matchMedia('(max-width: 47.99rem)')
+    const adaptPanels = () => { if (narrow.matches && settingsOpen) setNodesOpen(false) }
+    narrow.addEventListener('change', adaptPanels)
+    adaptPanels()
+    return () => narrow.removeEventListener('change', adaptPanels)
+  }, [settingsOpen])
 
   const measureNodesHeader = useCallback((header: HTMLElement | null) => {
     const panel = header?.closest<HTMLElement>('.map-workspace-nodes')
@@ -78,9 +99,31 @@ export default function MapPage() {
     return () => observer.disconnect()
   }, [packetsOpen])
 
+  useLayoutEffect(() => {
+    const view = mapView.current
+    const controls = view?.querySelector<HTMLElement>('.map-preview-workspace-controls')
+    const rail = controls?.querySelector<HTMLElement>('.map-preview-workspace-rail')
+    const button = rail?.querySelector('button')
+    const group = view?.parentElement
+    const handle = group?.querySelector('.map-workspace-resize')
+    if (!view || !controls || !rail || !button || !group || !handle) return
+    const measure = () => {
+      const availableHeight = group.getBoundingClientRect().height - handle.getBoundingClientRect().height
+      const chromeHeight = view.getBoundingClientRect().height - controls.getBoundingClientRect().height
+      const railOffset = parseFloat(getComputedStyle(rail).marginBlockStart)
+      // Leave one pixel for the browser's integer scroll offset at fractional rail edges.
+      setMinimumMapHeight(Math.ceil(Math.max(availableHeight * 0.25,
+        chromeHeight + railOffset + button.getBoundingClientRect().height + 1)))
+    }
+    const observer = new ResizeObserver(measure)
+    for (const element of [view, controls, rail, button, group]) observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [nodesOpen])
+
   function select(id: string) {
     setActive({ kind: 'node', id })
-    setNodesOpen(true)
+    changeNodesOpen(true)
     setFocusRequest(value => value + 1)
     overlapOrigin.current = null
   }
@@ -92,12 +135,12 @@ export default function MapPage() {
 
   function selectPacket(row: PacketTableRow) {
     setActive({ kind: 'packet', row })
-    setNodesOpen(true)
+    changeNodesOpen(true)
     overlapOrigin.current = null
   }
 
   function pick(ids: readonly string[]) {
-    setNodesOpen(true)
+    changeNodesOpen(true)
     if (ids.length === 1) select(ids[0])
     else {
       const origin = document.activeElement
@@ -122,11 +165,12 @@ export default function MapPage() {
           if (!open && packetsBody.current?.contains(document.activeElement)) packetsToggle.current?.focus()
           setPacketsOpen(open)
         }}>
-      <ResizablePanel className="map-workspace-view" defaultSize={60} minSize={25}>
+      <ResizablePanel className="map-workspace-view" ref={mapView} defaultSize={60} minSize={minimumMapHeight === null ? 25 : `${minimumMapHeight}px`}>
         <MapPreview presentation="workspace" sceneId={example.id} label="Regional fixture map" center={mapShowcaseCenter}
+          settingsOpen={settingsOpen} onSettingsOpenChange={changeSettingsOpen}
           scene={scene} selectedId={selectedId} focusRequest={focusRequest} regional
           onPick={pick} onClearSelection={clearSelection} onClusterToggle={setClustered} onViewportNodesChange={setViewportNodes} />
-        <Collapsible className="map-workspace-nodes" open={nodesOpen} onOpenChange={setNodesOpen}>
+        <Collapsible className="map-workspace-nodes" open={nodesOpen} onOpenChange={changeNodesOpen}>
           <CollapsibleTrigger className="map-preview-button map-workspace-node-toggle" aria-label={nodesOpen ? 'Hide nodes' : 'Show nodes'}>
             <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d={nodesOpen ? 'm15 4-8 8 8 8' : 'm9 4 8 8-8 8'} />
