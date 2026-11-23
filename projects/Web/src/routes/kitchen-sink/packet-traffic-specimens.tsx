@@ -4,7 +4,7 @@ import { Calendar, CalendarGrid, CalendarHeading, CalendarNext, CalendarPrevious
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@ui-sdk/react/collapsible'
 import { Drawer, DrawerBackdrop, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@ui-sdk/react/drawer'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@ui-sdk/react/field'
-import { Input } from '@ui-sdk/react/input'
+import { Input, InputClear, InputGroup } from '@ui-sdk/react/input'
 import { Popover, PopoverClose, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from 'react'
 import { flushSync } from 'react-dom'
@@ -59,6 +59,24 @@ function rangeValues(range: HistogramRange | null): HistogramRange {
   return range ? { from: format(range.from), to: format(range.to) } : { from: '', to: '' }
 }
 
+function ArrivalRangeSummary({ range }: { range: HistogramRange | null }) {
+  const values = rangeValues(range)
+  const offset = (instant: string) => offsetFormatter.formatToParts(Date.parse(instant)).find(({ type }) => type === 'timeZoneName')?.value
+  const fromOffset = range ? offset(range.from) : undefined
+  const toOffset = range ? offset(range.to) : undefined
+  return <span className="ks-arrival-summary" aria-hidden="true">
+    {!range && <span className="ks-arrival-all-times">All times</span>}
+    {(['from', 'to'] as const).map(bound => {
+      const [date, time] = values[bound].split(' ')
+      const boundOffset = bound === 'from' ? fromOffset : toOffset
+      return <span className="ks-arrival-endpoint" key={bound} data-empty={!range ? '' : undefined}>
+        <span>{bound === 'from' ? 'From' : 'To'}</span>
+        <time dateTime={range?.[bound]}><span>{date || '0000-00-00'}</span>{' '}<span>{time || '00:00:00'}{fromOffset !== toOffset && ` ${boundOffset}`}</span></time>
+      </span>
+    })}
+  </span>
+}
+
 function arrivalDate(value: string) {
   const date = value.trim().split(/[ T]/, 1)[0]
   return isISODate(date) ? date : undefined
@@ -110,14 +128,15 @@ function ArrivalCalendar({ dates, month, onDatesChange }: {
   </Calendar>
 }
 
-function TrafficFilterSection({ group, values, onValuesChange }: {
+function TrafficFilterSection({ group, values, onValuesChange, defaultOpen = false }: {
   group: TrafficFilterGroup
   values: readonly string[]
   onValuesChange: (values: readonly string[]) => void
+  defaultOpen?: boolean
 }) {
   const selectionStatus = useId()
 
-  return <Collapsible className="ks-traffic-filter-section">
+  return <Collapsible className="ks-traffic-filter-section" defaultOpen={defaultOpen}>
     <CollapsibleTrigger className="ks-traffic-filter-heading" aria-describedby={values.length ? selectionStatus : undefined}>
       <span>{group.label}</span>
       {values.length > 0 && <span className="ks-traffic-filter-selected" id={selectionStatus} aria-hidden="true">{count.format(values.length)} selected</span>}
@@ -207,10 +226,12 @@ function ReceptionDetails({ drawer, title, hint, row, announcement, filterNote, 
 }
 
 export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }: {
-  presentation?: 'specimen' | 'workspace'
+  presentation?: 'specimen' | 'workspace' | 'page'
   inspection?: { selectedId?: string; controls: string; onSelect: (row: PacketTableRow) => void }
 }) {
   const heading = useId()
+  const fullPage = presentation === 'page'
+  const hasControls = presentation !== 'workspace'
   const rangeStatus = useId()
   const activeFilterStatus = useId()
   const detailsId = useId()
@@ -229,8 +250,8 @@ export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }
     buckets, series, totalReceptions, loadedReceptions, rows, range, setRange, hasMore, isLoadingMore, loadMore, resetKey, referenceTime,
     filterGroups, filterValues, setFilterValues, activeFilterCount, matchesReception, hashQuery, setHashQuery,
   } = usePacketTrafficDemo()
-  const [filtersVisible, setFiltersVisible] = useState(presentation === 'specimen')
-  const filterRail = presentation === 'specimen' && filtersVisible && layout === 'rail'
+  const [filtersVisible, setFiltersVisible] = useState(presentation === 'specimen' || (fullPage && inline))
+  const filterRail = hasControls && filtersVisible && (fullPage ? inline : layout === 'rail')
   const [editorOpen, setEditorOpen] = useState(false)
   const [edits, setEdits] = useState<HistogramRange | null>(null)
   const [submitted, setSubmitted] = useState(false)
@@ -339,17 +360,28 @@ export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }
     dismissDetails()
   }
 
+  const filterToggle = <CollapsibleTrigger className="ks-traffic-filter-toggle" ref={filtersToggle} aria-describedby={filterToggleDescription}>
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+      <path d="M5.5 2.5v11" />
+      <path d={filtersVisible ? 'm10.5 6-2 2 2 2' : 'm8.5 6 2 2-2 2'} />
+    </svg>
+    {filtersVisible ? 'Hide filters' : 'Show filters'}
+  </CollapsibleTrigger>
+
   const trafficContent = <>
-        {presentation === 'specimen' && <CollapsiblePanel className="ks-traffic-filters" role="region" aria-label="Packet traffic filters" tabIndex={filtersVisible ? 0 : undefined} keepMounted>
+        {hasControls && <CollapsiblePanel className="ks-traffic-filters" role="region" aria-label="Packet traffic filters" tabIndex={filtersVisible ? 0 : undefined} keepMounted>
           {filterRail && <h3 className="ks-traffic-filters-heading">Filters</h3>}
+          {fullPage && !filterRail && <CollapsibleTrigger className="ks-traffic-filter-toggle ks-traffic-mobile-close">Hide filters</CollapsibleTrigger>}
           {filtersVisible && <div className="ks-arrival-filter">
+            <div className="ks-arrival-field">
             <Popover presentation="auto" open={editorOpen} onOpenChange={(open, { reason }) => {
               setEditorOpen(open)
               if (!open && (reason === 'close-press' || reason === 'escape-key' || reason === 'trigger-press')) resetDraft()
             }}>
               <PopoverTrigger className="ks-arrival-trigger" ref={editTrigger} aria-label="Edit arrival time" aria-describedby={rangeStatus}>
-                <span>Arrival time</span>
-                <span className="ks-arrival-summary" aria-hidden="true">{range ? <RangeSummary range={range} /> : 'All times'}</span>
+                <span className="ks-arrival-label">Arrival time <span>· {timeZoneLabel}</span></span>
+                <ArrivalRangeSummary range={range} />
               </PopoverTrigger>
               <PopoverContent className="ks-arrival-editor" align="start" side={filterRail ? 'end' : 'bottom'} sideOffset={5} collisionPadding={8} initialFocus={() => fromInput.current}>
                 <PopoverTitle>Arrival time</PopoverTitle>
@@ -374,37 +406,37 @@ export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }
                 </form>
               </PopoverContent>
             </Popover>
-            {range && <Button className="ks-traffic-clear" aria-label="Clear time range" onClick={() => {
+            <Button className="ks-arrival-clear" aria-label="Clear arrival time" disabled={!range} onClick={() => {
               commitRange(null)
               editTrigger.current?.focus()
-            }}>Clear</Button>}
+            }}>{closeIcon}</Button>
+            </div>
           </div>}
-          {filtersVisible && filterGroups.map(group => <TrafficFilterSection key={group.key} group={group} values={filterValues[group.key] ?? []}
+          {filtersVisible && filterGroups.map(group => <TrafficFilterSection key={group.key} group={group} values={filterValues[group.key] ?? []} defaultOpen={fullPage}
             onValuesChange={values => setFilterValues(group.key, values)} />)}
         </CollapsiblePanel>}
         <div className="ks-traffic-workspace" ref={workspace} data-inspecting={inline && selected ? '' : undefined}>
           <div className="ks-traffic-list" onKeyDown={onListKeys}>
-            {presentation === 'specimen' && <div className="ks-traffic-overview">
-              <div className="ks-traffic-hash-control">
-                <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <circle cx="7" cy="7" r="4.25" />
-                  <path d="m10.25 10.25 3 3" />
-                </svg>
-                <Input type="search" aria-label="Search by hash" placeholder="Search by hash..." value={hashQuery} onValueChange={setHashQuery}
-                  autoComplete="off" autoCapitalize="none" spellCheck={false} />
-              </div>
+            {hasControls && <div className="ks-traffic-overview">
+                <InputGroup className="ks-traffic-hash-control">
+                  <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <circle cx="7" cy="7" r="4.25" />
+                    <path d="m10.25 10.25 3 3" />
+                  </svg>
+                  <Input type="search" aria-label="Search by hash" placeholder="Search by hash..." value={hashQuery} onValueChange={setHashQuery}
+                    autoComplete="off" autoCapitalize="none" spellCheck={false} />
+                  {fullPage && <InputClear className="ks-traffic-search-clear" aria-label="Clear hash search">{closeIcon}</InputClear>}
+                </InputGroup>
               <TimeHistogram buckets={buckets} series={series} measure="Receptions over time" unit="receptions" timeZone={timeZone} timeZoneLabel={timeZoneLabel}
                 draftRange={editorOpen && edits ? validation.range : null} appliedRange={range} onRangeZoom={commitRange}
                 renderRangeSummary={(selection) => <RangeSummary range={selection} />} rangeFocusFallback={() => editTrigger.current ?? filtersToggle.current} />
               <div className="ks-traffic-context">
-                <CollapsibleTrigger className="ks-traffic-filter-toggle" ref={filtersToggle} aria-describedby={filterToggleDescription}>
-                  <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-                    <path d="M5.5 2.5v11" />
-                    <path d={filtersVisible ? 'm10.5 6-2 2 2 2' : 'm8.5 6 2 2-2 2'} />
-                  </svg>
-                  {filtersVisible ? 'Hide filters' : 'Show filters'}
-                </CollapsibleTrigger>
+                {filterToggle}
+                {fullPage && <Button className="ks-traffic-clear" disabled={!activeFilterCount && !hashQuery} focusableWhenDisabled onClick={() => {
+                  for (const group of filterGroups) setFilterValues(group.key, [])
+                  setHashQuery('')
+                  commitRange(null)
+                }}>Clear filters</Button>}
                 <span className="ks-traffic-brush-hint">Click or drag to select a range</span>
                 <p className="ks-visually-hidden" id={rangeStatus} role="status" aria-label="Active time range">
                   {range ? <RangeSummary range={range} /> : 'All times'}
@@ -421,7 +453,7 @@ export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }
             </div>}
             <PacketTable rows={rows} referenceTime={referenceTime} timeZone={timeZone} timeZoneLabel={timeZoneLabel} resetKey={resetKey} hasMore={hasMore} isLoadingMore={isLoadingMore}
               compact={presentation === 'workspace' && layout === 'compact'}
-              statusLabels={presentation === 'workspace' ? { live: 'Sample receptions', resumed: 'Fixture resumed', 'lost-connection': 'Fixture connection gap' } : undefined}
+              statusLabels={presentation !== 'specimen' ? { live: 'Sample receptions', resumed: 'Fixture resumed', 'lost-connection': 'Fixture connection gap' } : undefined}
               loadMore={loadMore} selectedId={inspection ? inspection.selectedId : selected?.id} onActivate={selectReception}
               onNavigate={(inspection ? inspection.selectedId !== undefined : inline && selected) ? selectReception : undefined}
               selectionControls={inspection ? inspection.controls : inline ? detailsId : undefined} />
@@ -435,11 +467,11 @@ export function PacketTrafficSpecimens({ presentation = 'specimen', inspection }
 
   return (
     <section className="ks-section ks-packet-traffic" data-presentation={presentation} aria-labelledby={heading}>
-      <div className={presentation === 'workspace' ? 'ks-visually-hidden' : 'ks-section-heading'}>
+      <div className={presentation !== 'specimen' ? 'ks-visually-hidden' : 'ks-section-heading'}>
         <h2 id={heading}>Packet traffic</h2>
         {presentation === 'specimen' && <p>24 hours · {count.format(totalReceptions)} sample receptions. Filter the list or select a reception to view its details.</p>}
       </div>
-      {presentation === 'specimen' ? <Collapsible className="ks-traffic-layout" data-filter-rail={filterRail ? '' : undefined} open={filtersVisible} onOpenChange={(open) => {
+      {hasControls ? <Collapsible className="ks-traffic-layout" aria-label={fullPage ? 'Packet filters' : undefined} data-filter-rail={filterRail ? '' : undefined} open={filtersVisible} onOpenChange={(open) => {
         setFiltersVisible(open)
         if (!open) setEditorOpen(false)
       }}>{trafficContent}</Collapsible> : <div className="ks-traffic-layout">{trafficContent}</div>}

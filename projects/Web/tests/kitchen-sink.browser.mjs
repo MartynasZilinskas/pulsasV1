@@ -19,9 +19,10 @@ async function withWorkbench(options, verify, prepare) {
   const errors = []
   const disallowedRequests = []
   page.on('pageerror', (error) => errors.push(error.message))
+  await page.routeWebSocket('**/*', socket => socket.close())
   await page.route('**/*', (route) => {
     const target = new URL(route.request().url())
-    if (target.origin !== origin || target.pathname.startsWith('/graphql')) {
+    if (target.origin !== origin || /^\/(api|graphql)(\/|$)/.test(target.pathname)) {
       disallowedRequests.push(target.href)
       return route.abort()
     }
@@ -469,7 +470,7 @@ test('packet traffic loads older fixture receptions inside its own scrolling tab
     await fillArrivalRange(traffic, '2026-11-19 16:00', '2026-11-19 16:15')
     await traffic.getByRole('button', { name: 'Apply range' }).press('Enter')
     assert.equal(await scroller.evaluate(node => node.scrollTop), 0)
-    await traffic.getByRole('button', { name: 'Clear time range' }).press('Enter')
+    await traffic.getByRole('button', { name: 'Clear arrival time' }).press('Enter')
     assert.equal(await table.getAttribute('aria-rowcount'), '36')
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight })
     await assertMoreReceptions(page, table)
@@ -683,7 +684,7 @@ test('the desktop inspector switches rows in place and stays open when the filte
     await page.keyboard.press('Escape')
     assert.ok(await inspector.isVisible(), 'Escape on a filter control does not close the inspector')
 
-    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    await traffic.getByRole('button', { name: 'Clear arrival time' }).click()
     assert.doesNotMatch(await inspector.innerText(), /Outside the current filter/i)
     assert.equal(await inspector.locator('header').innerText(), 'Reception details')
     assert.equal(await selected.getAttribute('data-reception-id'), 'reception-95-82')
@@ -1014,7 +1015,7 @@ test('histogram Zoom applies the same arrival filter as the sidebar', async () =
     await confirmation.getByRole('button', { name: 'Zoom', exact: true }).click()
     assert.match(await table.innerText(), /no receptions/i)
     assert.equal(await bins.count(), 96)
-    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    await traffic.getByRole('button', { name: 'Clear arrival time' }).click()
     assert.equal(await newest(), initialNewest)
     assert.equal(await table.locator('[data-feed-status]').count(), 3)
     assert.equal(await histogram.locator('.time-histogram-brush').count(), 0)
@@ -1143,7 +1144,7 @@ test('the UI SDK agent can apply an arrival range, toggle filters, and clear the
     assert.equal(await traffic.getByRole('button', { name: 'Edit arrival time' }).isVisible(), false)
     assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-19T14:14:43.928Z')
     await act([{ ref: 'Show filters', action: 'toggle' }])
-    await act([{ ref: 'Clear time range', action: 'press' }])
+    await act([{ ref: 'Clear arrival time', action: 'press' }])
     assert.equal(await table.locator('time').first().getAttribute('datetime'), '2026-11-20T13:59:49.285Z')
   }, loadWithAgent)
 })
@@ -1461,7 +1462,7 @@ test('packet filter sections combine, stay applied when hidden, and share the ar
     await traffic.getByRole('button', { name: 'Show filters', exact: true }).press('Enter')
     if (await section('Region').getAttribute('aria-expanded') === 'false') await section('Region').press('Enter')
     assert.equal(await choice('KUN').getAttribute('aria-checked'), 'true')
-    await traffic.getByRole('button', { name: 'Clear time range' }).click()
+    await traffic.getByRole('button', { name: 'Clear arrival time' }).click()
     assert.equal(await rows.first().getAttribute('data-reception-id'), 'reception-94-114')
   })
 })

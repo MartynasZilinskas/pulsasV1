@@ -29,10 +29,11 @@ export function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const kitchenSinkSelected = pathname === '/kitchen-sink' || pathname.startsWith('/kitchen-sink/')
   const mapSelected = pathname === '/map' || pathname.startsWith('/map/')
+  const workspaceSelected = mapSelected || pathname === '/packets' || pathname.startsWith('/packets/')
   const overflowSelected = kitchenSinkSelected || sections.slice(4).some(({ to }) => pathname === to || pathname.startsWith(`${to}/`))
 
   return (
-    <div className={`app-shell${mapSelected ? ' app-shell-workspace' : ''}`}>
+    <div className={`app-shell${workspaceSelected ? ' app-shell-workspace' : ''}`}>
       <Button className="app-skip-link" render={<a href="#app-content" />}>Skip to content</Button>
       <header className="app-header">
         <Button className="app-brand" aria-label="Pulsas home" render={<Link to="/packets" />}>
@@ -99,7 +100,7 @@ export function AppShell() {
           </Select>
         </div>
       </header>
-      <main className={`app-content${kitchenSinkSelected ? ' app-content-showcase' : ''}${mapSelected ? ' app-content-workspace' : ''}`} id="app-content" tabIndex={-1}>
+      <main className={`app-content${kitchenSinkSelected ? ' app-content-showcase' : ''}${workspaceSelected ? ' app-content-workspace' : ''}`} id="app-content" tabIndex={-1}>
         <Outlet />
       </main>
       {!mapSelected && <footer className="app-footer">Pulsas <span aria-hidden="true">·</span> Atviras Tinklas</footer>}

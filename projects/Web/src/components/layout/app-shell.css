@@ -46,6 +46,8 @@ body:has(.app-shell) { margin: 0; }
 .app-content-showcase { background: transparent; }
 .app-content:focus { outline: none; }
 .app-shell-workspace { box-sizing: border-box; block-size: 100dvh; min-block-size: 0; grid-template-rows: auto minmax(0, 1fr); }
+.app-shell-workspace:has(> .app-footer) { grid-template-rows: auto minmax(0, 1fr) auto; }
+.app-shell-workspace > .app-footer { display: flex; }
 .app-shell .app-content-workspace { min-block-size: 0; padding: 0; }
 .app-footer { display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-block-size: 2.5rem; border-block-start: 1px solid var(--ks-rule); padding: 0.5rem 1.5rem; color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); }
 .app-section { max-inline-size: 44rem; }

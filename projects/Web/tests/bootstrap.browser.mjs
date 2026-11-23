@@ -12,9 +12,12 @@ test('the local Web application starts without a backend dependency', async () =
     const pageErrors = []
     const unexpectedRequests = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
+    await page.routeWebSocket('**/*', socket => socket.close())
     await page.route('**/*', (route) => {
-      const target = new URL(route.request().url())
-      if (target.origin !== url || target.pathname.startsWith('/graphql')) {
+      const request = route.request()
+      const target = new URL(request.url())
+      if (target.origin !== url || /^\/(api|graphql)(\/|$)/.test(target.pathname)
+        || (['fetch', 'xhr'].includes(request.resourceType()) && !target.pathname.startsWith('/src/'))) {
         unexpectedRequests.push(target.pathname)
         return route.abort()
       }

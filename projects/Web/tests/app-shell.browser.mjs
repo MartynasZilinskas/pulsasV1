@@ -54,7 +54,14 @@ async function assertSection(page, name) {
   await page.getByRole('heading', { name, level: 1, exact: true }).waitFor()
   assert.equal(new URL(page.url()).pathname, `/${name.toLowerCase()}`)
   if (name === 'Map') {
+    assert.equal(await page.getByRole('contentinfo').count(), 0)
     await page.getByRole('region', { name: 'Map workspace', exact: true }).waitFor()
+    assert.match(await page.getByRole('main').innerText(), /fixture/i)
+    return
+  }
+  if (name === 'Packets') {
+    assert.ok(await page.getByRole('contentinfo').isVisible())
+    await page.getByRole('region', { name: 'Packets workspace', exact: true }).waitFor()
     assert.match(await page.getByRole('main').innerText(), /fixture/i)
     return
   }
@@ -163,7 +170,7 @@ test('mobile touch navigation moves overflow destinations into More and marks th
   await withShell({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, async (page) => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
     const more = nav.getByRole('button', { name: /^More/ })
-    assert.equal(await page.getByRole('contentinfo').isVisible(), false)
+    assert.ok(await page.getByRole('contentinfo').isVisible())
     assert.deepEqual(await nav.getByRole('link').allTextContents(), primarySections)
     for (const name of primarySections) {
       const link = nav.getByRole('link', { name, exact: true })
@@ -242,6 +249,8 @@ test('small and enlarged-text layouts scroll content clear of the bottom navigat
   for (const width of [320, 768, 1024]) {
     await withShell({ viewport: { width, height: 600 } }, async (page) => {
       await assertNoOverflow(page)
+      await page.getByRole('navigation').getByRole('link', { name: 'Channels', exact: true }).click()
+      await assertSection(page, 'Channels')
       await page.evaluate(() => {
         document.documentElement.style.fontSize = '20px'
         const content = document.querySelector('.app-section-message')
@@ -329,7 +338,7 @@ test('SDK agents discover and operate shell navigation at desktop and mobile wid
       console.log(JSON.stringify({ width, snapshot }, null, 2))
       for (const entry of snapshot) assert.ok(entry.label, `${entry.component} ${entry.ref} has no name`)
       const labels = snapshot.map((entry) => entry.label)
-      for (const label of ['Pulsas home', 'Skip to content', ...primarySections, 'More', 'Explore the Kitchen Sink']) {
+      for (const label of ['Pulsas home', 'Skip to content', ...primarySections, 'More', 'Search by hash']) {
         assert.ok(labels.includes(label), `${label} is missing from the SDK snapshot`)
       }
       if (width === 1440) {
@@ -362,8 +371,8 @@ test('SDK agents discover and operate shell navigation at desktop and mobile wid
       await page.getByRole('heading', { name: 'Kitchen Sink', level: 1 }).waitFor()
       await page.goto(`${origin}/packets`)
       await page.getByRole('heading', { name: 'Packets', level: 1 }).waitFor()
-      await act([{ ref: 'Explore the Kitchen Sink', action: 'press' }])
-      await page.getByRole('heading', { name: 'Kitchen Sink', level: 1 }).waitFor()
+      await act([{ ref: 'Search by hash', action: 'setValue', args: ['a41000'] }])
+      assert.equal(await page.getByRole('searchbox', { name: 'Search by hash', exact: true }).inputValue(), 'a41000')
     }, true)
   }
 })

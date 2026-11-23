@@ -7,6 +7,7 @@ import { KitchenSinkPage } from './routes/kitchen-sink/page'
 import { SectionPage } from './routes/section-page'
 
 const MapPage = lazy(() => import('./routes/map/page'))
+const PacketsPage = lazy(() => import('./routes/packets/page'))
 
 const rootRoute = createRootRoute()
 const appRoute = createRoute({
@@ -24,7 +25,7 @@ const index = createRoute({
 const packets = createRoute({
   getParentRoute: () => appRoute,
   path: '/packets',
-  component: () => <SectionPage section="Packets" />,
+  component: () => <Suspense fallback={<p role="status">Loading packets…</p>}><PacketsPage /></Suspense>,
 })
 const channels = createRoute({
   getParentRoute: () => appRoute,
