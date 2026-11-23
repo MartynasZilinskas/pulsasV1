@@ -724,7 +724,8 @@ test('incoming fixture receptions activate packet overview in the side panel and
     const details = panel.getByRole('region', { name: 'Packet overview', exact: true })
     await details.waitFor()
     await panel.getByRole('heading', { name: 'Packet overview', level: 2, exact: true }).waitFor()
-    assert.equal(await details.getByRole('heading').count(), 0, 'packet overview has no duplicate body title')
+    assert.equal(await details.getByRole('heading', { name: 'Packet overview', exact: true }).count(), 0, 'packet overview has no duplicate body title')
+    for (const name of ['Reception', 'Exact packet', 'Other hearings']) await details.getByRole('heading', { name, exact: true }).waitFor()
     assert.equal(await table.locator('tr[data-selected]').getAttribute('data-reception-id'), id)
     const code = await first.locator('td').first().innerText()
     assert.ok((await details.innerText()).includes(code))
@@ -745,6 +746,179 @@ test('incoming fixture receptions activate packet overview in the side panel and
     await page.getByRole('button', { name: 'Show packets', exact: true }).click()
     await table.waitFor()
     assert.match(await page.getByRole('main').innerText(), /not filtered by map position/i)
+  })
+})
+
+async function overviewExamples(page) {
+  return page.evaluate(async () => {
+    const { trafficRows } = await import('/src/routes/kitchen-sink/packet-traffic-fixtures.ts')
+    const { getPacketOverview } = await import('/src/routes/map/packet-overview-fixtures.ts')
+    const ids = new Set([...document.querySelectorAll('tr[data-reception-id]')].map(row => row.dataset.receptionId))
+    return trafficRows.filter(row => ids.has(row.id)).map(getPacketOverview)
+  })
+}
+
+async function openOverview(page, id) {
+  await page.getByRole('table', { name: 'Packet receptions', exact: true }).locator(`tr[data-reception-id="${id}"] td`).first().click()
+  const overview = page.getByRole('region', { name: 'Packet overview', exact: true })
+  await overview.waitFor()
+  assert.equal(await overview.getAttribute('data-overview-reception'), id)
+  return overview
+}
+
+test('combined overview keeps prefix evidence read-only and switches reception and exact packet together', async () => {
+  await withMap({ viewport: { width: 1440, height: 1000 } }, async page => {
+    const examples = await overviewExamples(page)
+    const example = examples.find(item => item.packet?.path.hops.length === 3
+      && item.otherHearings.some(other => other.samePacket) && item.otherHearings.some(other => !other.samePacket))
+    assert.ok(example, 'visible fixture covers candidate evidence and both hearing relationships')
+    const overview = await openOverview(page, example.reception.row.id)
+    assert.equal(await overview.locator('dt').filter({ hasText: /^(Reception|Packet|Payload) ID$/ }).count(), 0, 'internal IDs are not overview facts')
+    assert.doesNotMatch(await overview.innerText(), /fixture-packet-|fixture-payload-|reception-\d+-\d+/)
+    assert.ok(await overview.getByText('Synthetic fixture', { exact: true }).isVisible())
+    assert.doesNotMatch(await overview.innerText(), /not a combined path|Shared payload does not mean|Open a hearing to inspect/)
+    const exact = overview.getByRole('region', { name: 'Exact packet', exact: true })
+    const originalPacket = await exact.innerText()
+    const triggers = overview.getByRole('button', { name: /^Inspect prefix/ })
+    assert.equal(await triggers.count(), 3)
+    await triggers.nth(0).press('Enter')
+    await overview.getByText('Assessment pick', { exact: true }).waitFor()
+    assert.match(await overview.locator('.reception-packet-hop-details').first().innerText(), /Neighbour support/)
+    await triggers.nth(1).press('Space')
+    assert.equal(await overview.getByText('Alternative', { exact: true }).count(), 2)
+    await triggers.nth(2).click()
+    await overview.getByText('No matching candidates.', { exact: true }).waitFor()
+    assert.equal(await overview.getByRole('button', { name: /^Select / }).count(), 0)
+    assert.equal(await overview.getByRole('link').count(), 0, 'synthetic candidates do not link to map nodes')
+    await overview.getByRole('button', { name: /^Browse \d+ hearings$/ }).press('Enter')
+    assert.equal(await overview.getByRole('button', { name: /^Open hearing/ }).count(), example.otherHearings.length)
+    const same = example.otherHearings.find(other => other.samePacket)
+    const sameButton = overview.getByRole('button', { name: `Open hearing at ${same.observer}: ${same.row.code}, ${same.row.arrivedAt}`, exact: true })
+    assert.match(await sameButton.locator('..').innerText(), /Same exact packet/)
+    assert.equal(await sameButton.locator('..').locator('time').getAttribute('datetime'), same.row.arrivedAt)
+    assert.equal(await sameButton.getAttribute('aria-describedby'), await sameButton.locator('..').locator('.reception-packet-hearing-context').getAttribute('id'))
+    await sameButton.press('Enter')
+    await page.waitForFunction(id => document.querySelector('[data-overview-reception]')?.dataset.overviewReception === id, same.row.id)
+    assert.equal(await exact.innerText(), originalPacket, 'another reception of identical bytes retains exact packet facts')
+    assert.equal(await page.locator('tr[data-selected]').getAttribute('data-reception-id'), same.row.id)
+    const heading = page.getByRole('heading', { name: 'Packet overview', exact: true })
+    assert.ok(await heading.evaluate(node => node === document.activeElement), 'navigation moves focus from the removed hearing to the overview heading')
+    assert.equal(await overview.evaluate(node => node.scrollTop), 0, 'new overview starts at reception facts')
+    assert.equal(await page.locator('.map-active-body').evaluate(node => node.scrollTop), 0, 'persistent body also resets on navigation')
+    await overview.getByRole('button', { name: /^Browse \d+ hearings$/ }).click()
+    assert.equal(await overview.getByRole('button', { name: `Open hearing at ${same.observer}: ${same.row.code}, ${same.row.arrivedAt}`, exact: true }).count(), 0, 'current reception is excluded')
+    const different = example.otherHearings.find(other => !other.samePacket)
+    const differentButton = overview.getByRole('button', { name: `Open hearing at ${different.observer}: ${different.row.code}, ${different.row.arrivedAt}`, exact: true })
+    assert.match(await differentButton.locator('..').innerText(), /Different packet · shared payload/)
+    await differentButton.click()
+    await page.waitForFunction(id => document.querySelector('[data-overview-reception]')?.dataset.overviewReception === id, different.row.id)
+    assert.notEqual(await exact.innerText(), originalPacket)
+    assert.equal(await page.locator('tr[data-selected]').getAttribute('data-reception-id'), different.row.id)
+    assert.ok(await heading.evaluate(node => node === document.activeElement))
+  })
+})
+
+test('overview distinguishes unknown reception, missing decode, empty history, missing assessment and TRACE', async () => {
+  await withMap({ viewport: { width: 1440, height: 1000 } }, async page => {
+    const examples = await overviewExamples(page)
+    for (const kind of ['signal', 'decode', 'empty', 'assessment', 'trace', 'direct', 'flood']) {
+      const example = examples.find(item => kind === 'signal' ? item.reception.rssi === null
+        : kind === 'decode' ? item.packet === null
+          : kind === 'empty' ? item.packet?.path.status === 'Empty'
+            : kind === 'assessment' ? item.packet?.path.kind !== 'trace' && item.packet?.path.status === 'Unavailable'
+              : item.packet?.path.kind === kind)
+      assert.ok(example, `visible fixture includes ${kind}`)
+      const overview = await openOverview(page, example.reception.row.id)
+      const text = await overview.innerText()
+      if (kind === 'signal') assert.match(text, /RSSI unknown\s*SNR unknown/)
+      if (kind === 'decode') {
+        assert.match(text, /Packet not decoded/)
+        assert.equal(await overview.getByRole('button', { name: /^Inspect prefix/ }).count(), 0)
+      }
+      if (kind === 'empty') assert.match(text, /No path prefixes/)
+      if (kind === 'assessment') {
+        assert.match(text, /No assessment recorded; prefixes unknown/)
+        assert.doesNotMatch(text, /No path prefixes/)
+      }
+      if (kind === 'trace') {
+        assert.match(text, /SNR samples, not a node path/)
+        assert.equal(await overview.getByRole('button', { name: /^Inspect prefix/ }).count(), 0)
+      }
+      if (kind === 'direct') assert.match(text, /Remaining route/)
+      if (kind === 'flood') assert.match(text, /Flood history/)
+    }
+  })
+})
+
+test('overview scrolls internally with readable evidence at narrow and enlarged text in both themes', async () => {
+  for (const colorScheme of ['light', 'dark']) for (const width of [1440, 320]) {
+    await withMap({ viewport: { width, height: 900 }, colorScheme, ...(width === 320 ? { isMobile: true, hasTouch: true } : {}) }, async page => {
+      await page.evaluate(() => { document.documentElement.style.fontSize = '24px' })
+      const example = (await overviewExamples(page)).find(item => item.packet?.path.hops.length === 3)
+      assert.ok(example)
+      const overview = await openOverview(page, example.reception.row.id)
+      await overview.getByRole('button', { name: /^Inspect prefix 2:/ }).press('Enter')
+      await overview.getByRole('button', { name: /^Browse \d+ hearings$/ }).press('Space')
+      const bounds = await overview.evaluate(node => ({ width: node.clientWidth, scrollWidth: node.scrollWidth,
+        height: node.clientHeight, scrollHeight: node.scrollHeight }))
+      assert.equal(bounds.scrollWidth, bounds.width, 'overview has no horizontal scrolling')
+      assert.ok(bounds.scrollHeight > bounds.height, 'content scrolls inside the overview')
+      const actions = overview.getByRole('button', { name: /^Open hearing/ })
+      await actions.last().focus()
+      assert.ok(await actions.last().evaluate(node => {
+        const rect = node.getBoundingClientRect()
+        const frame = node.closest('[data-overview-reception]').getBoundingClientRect()
+        return rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 && rect.height >= 44
+      }), 'last hearing remains reachable by keyboard')
+      assert.deepEqual(await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight]), [width, 900])
+      assert.ok(await page.getByRole('button', { name: 'Zoom in', exact: true }).isVisible())
+      assert.ok(await page.getByRole('button', { name: 'Hide packets', exact: true }).isVisible())
+      assert.ok(await page.getByRole('navigation', { name: 'Main navigation', exact: true }).isVisible())
+    })
+  }
+})
+
+test('SDK agents discover prefix evidence and hearing navigation by their accessible names', async () => {
+  await withMap({ viewport: { width: 1440, height: 1000 } }, async page => {
+    const example = (await overviewExamples(page)).find(item => item.packet?.path.hops.length === 3 && item.otherHearings.length)
+    await openOverview(page, example.reception.row.id)
+    const result = await page.evaluate(async () => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      const snapshot = () => agent.snapshot().filter(entry => !entry.offPage && entry.component !== 'more')
+      const controls = snapshot()
+      const evidence = controls.find(entry => entry.label === 'Packet prefix evidence')
+      const browse = controls.find(entry => /^Browse \d+ hearings$/.test(entry.label))
+      const opened = await agent.act({ steps: [
+        { ref: evidence.ref, action: 'setValue', args: [[evidence.items[0].value]] },
+        { ref: browse.ref, action: 'press' },
+      ] })
+      return { unnamed: controls.filter(entry => !entry.label).map(entry => entry.component), opened,
+        evidence, browse, hearings: snapshot().filter(entry => /^Open hearing at /.test(entry.label)) }
+    })
+    assert.deepEqual(result.unnamed, [])
+    assert.ok(result.evidence)
+    assert.ok(result.browse)
+    assert.equal(result.opened.ok, true, result.opened.error?.message)
+    assert.ok(await page.getByText('Assessment pick', { exact: true }).isVisible(), 'agent opening the discovered prefix exposes assessment evidence')
+    assert.equal(result.hearings.length, example.otherHearings.length)
+    const hearing = result.hearings[0]
+    const destination = example.otherHearings.find(other => hearing.label === `Open hearing at ${other.observer}: ${other.row.code}, ${other.row.arrivedAt}`)
+    assert.ok(destination)
+    const switched = await page.evaluate(async ref => {
+      const { agent } = await import('/tests/kitchen-sink-agent.mjs')
+      return agent.act({ steps: [{ ref, action: 'press' }] })
+    }, hearing.ref)
+    assert.equal(switched.ok, true, switched.error?.message)
+    await page.waitForFunction(id => document.querySelector('[data-overview-reception]')?.dataset.overviewReception === id, destination.row.id)
+    assert.equal(await page.locator('tr[data-selected]').getAttribute('data-reception-id'), destination.row.id)
+  }, async page => {
+    await page.route(`${origin}/map?mapDiagnostics`, async route => {
+      const response = await route.fetch()
+      const html = await response.text()
+      const body = html.replace(/src="\/src\/main\.tsx(?:\?[^\"]*)?"/, 'src="/tests/kitchen-sink-agent.mjs"')
+      assert.notEqual(body, html)
+      await route.fulfill({ response, body })
+    })
   })
 })
 

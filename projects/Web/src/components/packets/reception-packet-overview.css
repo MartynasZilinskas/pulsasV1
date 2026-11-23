@@ -1,0 +1,47 @@
+.reception-packet-overview { block-size: 100%; min-inline-size: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0.625rem; color: var(--ks-ink); font-size: 0.8125rem; line-height: 1.5; overflow-wrap: anywhere; }
+.reception-packet-fixture { margin: 0 0 0.75rem; color: var(--ks-muted); font-size: 0.6875rem; }
+.reception-packet-section + .reception-packet-section { margin-block-start: 1rem; padding-block-start: 0.875rem; border-block-start: 1px solid var(--ks-rule); }
+.reception-packet-section h3 { margin: 0 0 0.5rem; font-size: 0.8125rem; font-weight: 650; }
+.reception-packet-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.375rem; margin-block-end: 0.5rem; }
+.reception-packet-section-heading h3 { margin: 0; }
+.reception-packet-state { color: var(--ks-muted); font-size: 0.75rem; }
+.reception-packet-facts { display: grid; gap: 0.5rem; margin: 0; }
+.reception-packet-facts > div { display: grid; grid-template-columns: minmax(0, 4.5rem) minmax(0, 1fr); gap: 0.5rem; align-items: baseline; }
+.reception-packet-facts dt { color: var(--ks-muted); font-size: 0.75rem; }
+.reception-packet-facts dd { min-inline-size: 0; margin: 0; }
+.reception-packet-facts code { font-size: 0.75rem; }
+.reception-packet-note { margin: 0.375rem 0 0; color: var(--ks-muted); font-size: 0.75rem; }
+.reception-packet-path-meta { margin-block-start: 0.625rem; }
+.reception-packet-prefixes { margin-block-start: 0.75rem; }
+.reception-packet-hop { border-block-start: 1px solid var(--ks-rule); }
+.reception-packet-hop:last-child { border-block-end: 1px solid var(--ks-rule); }
+.reception-packet-hop h4 { margin: 0; font: inherit; }
+.reception-packet-hop-trigger { display: flex; align-items: center; gap: 0.5rem; inline-size: 100%; min-block-size: 2.75rem; padding: 0.5rem 0.25rem; border: 0; background: transparent; color: var(--ks-ink); font: inherit; text-align: start; cursor: pointer; }
+.reception-packet-hop-number { flex: none; color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); }
+.reception-packet-hop-trigger > code { font-size: 0.8125rem; }
+.reception-packet-hop-summary { flex: 1; min-inline-size: 0; font-size: 0.75rem; font-weight: 500; }
+.reception-packet-hop-summary > span { display: block; color: var(--ks-muted); font-size: 0.6875rem; font-weight: 400; }
+.reception-packet-hop-trigger > svg { flex: none; }
+.reception-packet-hop-trigger[data-open] > svg { transform: rotate(180deg); }
+.reception-packet-hop-trigger:hover, .reception-packet-hearing:hover { background: var(--ks-ground); }
+.reception-packet-hop-trigger:active, .reception-packet-hearing:active { background: var(--ks-accent-wash); }
+.reception-packet-hop-trigger:focus-visible, .reception-packet-hearing:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: -2px; }
+.reception-packet-hop-details { padding: 0.25rem 0 0.75rem; }
+.reception-packet-candidates, .reception-packet-hearings { margin: 0; padding: 0; list-style: none; }
+.reception-packet-candidates > li { padding: 0.625rem; border: 1px solid var(--ks-rule); border-radius: 0.25rem; }
+.reception-packet-candidates > li + li { margin-block-start: 0.5rem; }
+.reception-packet-candidates > li[data-assessment-selected] { border-inline-start: 3px solid var(--ks-control-edge); }
+.reception-packet-candidate-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem; }
+.reception-packet-candidate-heading strong { font-weight: 600; }
+.reception-packet-candidate-selection { margin: 0.25rem 0; font-size: 0.6875rem; color: var(--ks-muted); }
+.reception-packet-public-key { display: block; font-size: 0.6875rem; overflow-wrap: anywhere; }
+.reception-packet-hearings { margin-block-start: 0.625rem; }
+.reception-packet-hearings > li + li { border-block-start: 1px solid var(--ks-rule); }
+.reception-packet-hearing { display: grid; gap: 0.125rem; inline-size: 100%; min-block-size: 2.75rem; padding: 0.625rem 0.25rem; border: 0; background: transparent; color: var(--ks-muted); font: inherit; font-size: 0.75rem; text-align: start; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.reception-packet-hearing-title { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--ks-ink); font-weight: 550; }
+.reception-packet-hearing code { font-size: 0.6875rem; }
+.reception-packet-hearing-context { margin: 0; padding: 0 0.25rem 0.625rem; color: var(--ks-muted); font-size: 0.75rem; }
+.reception-packet-hearings-toggle { inline-size: 100%; min-block-size: 2.75rem; margin-block-start: 0.625rem; padding: 0.5rem; border: 1px solid var(--ks-control-edge); border-radius: 0.25rem; background: transparent; color: var(--ks-ink); font: inherit; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.reception-packet-hearings-toggle:hover { background: var(--ks-ground); }
+.reception-packet-hearings-toggle:active { background: var(--ks-accent-wash); }
+.reception-packet-hearings-toggle:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: -3px; }

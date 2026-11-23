@@ -4,10 +4,11 @@ import type { EvidenceAnchor } from '../../components/map/map-path-evidence'
 import { NodeAvatar } from '../../components/nodes/node-avatar'
 import { nodeRoles } from '../../components/nodes/node-role'
 import type { PacketTableRow } from '../../components/packets/packet-table'
+import { ReceptionPacketOverview } from '../../components/packets/reception-packet-overview'
 import { MapNodeFinder } from '../kitchen-sink/map-node-finder'
 import { MapNodeList } from '../kitchen-sink/map-node-list'
 import { MapVisibleNodes } from '../kitchen-sink/map-visible-nodes'
-import { ReceptionFacts } from '../kitchen-sink/packet-traffic-specimens'
+import { getPacketOverview } from './packet-overview-fixtures'
 
 export type ActiveMapContext =
   | { kind: 'visible' }
@@ -21,6 +22,7 @@ type Props = {
   active: ActiveMapContext
   headerRef?: Ref<HTMLElement>
   onSelectNode: (id: string) => void
+  onSelectReception: (row: PacketTableRow) => void
   onClear: () => void
   onExitCluster: (restoreFocus: boolean) => void
 }
@@ -56,7 +58,7 @@ function ClusterNodes({ anchors, ids, onSelectNode }: {
     selectedId={null} onSelect={onSelectNode} />
 }
 
-export function MapActivePanel({ anchors, viewportIds, active, headerRef, onSelectNode, onClear, onExitCluster }: Props) {
+export function MapActivePanel({ anchors, viewportIds, active, headerRef, onSelectNode, onSelectReception, onClear, onExitCluster }: Props) {
   const [finding, setFinding] = useState(false)
   const [query, setQuery] = useState('')
   const [focusRequest, setFocusRequest] = useState(0)
@@ -65,21 +67,29 @@ export function MapActivePanel({ anchors, viewportIds, active, headerRef, onSele
   const findButton = useRef<HTMLButtonElement>(null)
   const clearButton = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
+  const body = useRef<HTMLDivElement>(null)
   const overviewHeading = useRef<HTMLHeadingElement>(null)
   const focusWasInside = useRef(false)
+  const receptionNavigation = useRef(false)
   const searching = active.kind === 'visible' && finding
   const node = active.kind === 'node' ? anchors.find(({ id }) => id === active.id) : undefined
   const title = active.kind === 'packet' ? 'Packet overview'
     : active.kind === 'node' ? node?.name ?? 'Node unavailable'
       : active.kind === 'cluster' ? 'Cluster nodes' : searching ? 'Find node' : 'Visible nodes'
+  const receptionId = active.kind === 'packet' ? active.row.id : null
+
+  useLayoutEffect(() => {
+    if (receptionId && body.current) body.current.scrollTop = 0
+  }, [receptionId])
 
   useLayoutEffect(() => {
     if (active.kind !== 'visible') {
       setFinding(false)
       setQuery('')
     }
-    if ((active.kind === 'node' || active.kind === 'packet') && focusWasInside.current
-      && !panel.current?.contains(document.activeElement)) overviewHeading.current?.focus()
+    if (receptionNavigation.current || ((active.kind === 'node' || active.kind === 'packet') && focusWasInside.current
+      && !panel.current?.contains(document.activeElement))) overviewHeading.current?.focus({ preventScroll: true })
+    receptionNavigation.current = false
   }, [active])
 
   useLayoutEffect(() => {
@@ -135,7 +145,7 @@ export function MapActivePanel({ anchors, viewportIds, active, headerRef, onSele
     onExitCluster(true)
   }}>
     {!showingVisible && renderHeader()}
-    <div className="map-active-body">
+    <div className="map-active-body" ref={body}>
       {active.kind === 'visible' && (searching
         ? <MapNodeFinder presentation="compact" hideTitle anchors={anchors} overlap={[]} selectedId={null} input={input}
           query={query} onQueryChange={setQuery} onSelect={selectNode} onClearSelection={onClear} onExitOverlap={clear} />
@@ -152,10 +162,11 @@ export function MapActivePanel({ anchors, viewportIds, active, headerRef, onSele
           </dl>
         </> : <p role="status">This node is not available in the fixture.</p>}
       </section>}
-      {active.kind === 'packet' && <section className="map-active-overview" aria-label="Packet overview">
-        <p className="map-active-fixture">Fixture reception</p>
-        <ReceptionFacts row={active.row} />
-      </section>}
+      {active.kind === 'packet' && <ReceptionPacketOverview key={active.row.id} overview={getPacketOverview(active.row)}
+        onSelectReception={row => {
+          receptionNavigation.current = true
+          onSelectReception(row)
+        }} />}
     </div>
   </section>
 }

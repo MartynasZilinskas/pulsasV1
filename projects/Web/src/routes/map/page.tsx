@@ -188,7 +188,7 @@ export default function MapPage() {
           </CollapsibleTrigger>
           <CollapsiblePanel className="map-workspace-node-panel" id="map-active-panel" keepMounted>
             <MapActivePanel anchors={example.anchors} viewportIds={viewportNodes} active={active} headerRef={measureNodesHeader}
-              onSelectNode={select} onClear={clearSelection} onExitCluster={exitOverlap} />
+              onSelectNode={select} onSelectReception={selectPacket} onClear={clearSelection} onExitCluster={exitOverlap} />
           </CollapsiblePanel>
         </Collapsible>
       </ResizablePanel>
