@@ -1,0 +1,20 @@
+.channel-directory-item { display: flex; align-items: center; gap: 0.75rem; inline-size: 100%; min-block-size: 3.75rem; padding: 0.625rem 1rem; border: 0; border-inline-start: 2px solid transparent; border-block-end: 1px solid var(--ks-rule); background: transparent; color: var(--ks-ink); font: inherit; text-align: start; cursor: pointer; }
+.channel-directory-item > .ks-channel-icon { flex: none; color: var(--ks-muted); }
+.channel-directory-label { display: grid; min-inline-size: 0; gap: 0.125rem; }
+.channel-directory-name { overflow-wrap: anywhere; font-weight: 600; }
+.channel-directory-arrival { color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); }
+.channel-directory-item:hover { background: var(--ks-ground); }
+.channel-directory-item[aria-current] { border-inline-start-color: var(--ks-accent); background: var(--ks-accent-wash); }
+.channel-directory-item[aria-current] .channel-directory-name, .channel-directory-selected { color: var(--ks-accent); }
+.channel-directory-selected { margin-inline-start: auto; font-size: 1.125rem; }
+.channel-message-row { display: flex; flex-direction: column; align-items: stretch; gap: 0.125rem; inline-size: 100%; min-block-size: 3.375rem; border: 0; border-block-end: 1px solid var(--ks-rule); border-radius: 0; padding: 0.4375rem 1rem; background: transparent; color: var(--ks-ink); font: inherit; text-align: start; cursor: pointer; }
+.channel-message-row:hover { background: var(--ks-ground); }
+.channel-message-row:is([aria-expanded='true'], [aria-pressed='true']) { background: var(--ks-accent-wash); }
+.channel-message-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.125rem 0.625rem; min-inline-size: 0; line-height: 1.25rem; }
+.channel-message-sender { min-inline-size: 0; color: var(--ks-accent); font-weight: 600; overflow-wrap: anywhere; }
+.channel-message-counts { color: var(--ks-muted); font-size: 0.6875rem; }
+.channel-message-age { flex: none; margin-inline-start: auto; color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); white-space: nowrap; }
+.channel-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.channel-directory-item:focus-visible, .channel-message-row:focus-visible { position: relative; outline: 2px solid var(--ks-focus); outline-offset: -3px; }
+@media (pointer: coarse) { .channel-message-row { min-block-size: 3.75rem; } }
+@media (forced-colors: active) { .channel-directory-item[aria-current], .channel-message-row[aria-expanded='true'] { outline: 2px solid Highlight; outline-offset: -2px; } }

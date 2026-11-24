@@ -1,0 +1,27 @@
+.ks-state-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ks-state-control { min-block-size: 2.75rem; max-inline-size: 100%; padding: 0.5rem 0.625rem; border: 1px solid var(--ks-control-edge); border-radius: var(--ks-radius); background: var(--ks-paper); color: var(--ks-ink); font: 550 0.8125rem/1.5 var(--ks-sans); overflow-wrap: anywhere; cursor: pointer; }
+.ks-state-control:hover { background: var(--ks-ground); }
+.ks-state-control:active { background: var(--ks-accent-wash); }
+.ks-state-control:focus-visible, .ks-state-usage > summary:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: 3px; }
+.ks-state-readout { display: grid; margin-block: 0.75rem; color: var(--ks-muted); font: 0.75rem/1.5 var(--ks-mono); }
+.ks-state-readout > * { grid-area: 1 / 1; }
+.ks-state-readout > span { visibility: hidden; }
+.ks-state-readout strong { color: var(--ks-ink); font-weight: 550; }
+.ks-state-workspace { border: 1px solid var(--ks-rule); border-radius: var(--ks-radius); background: var(--ks-paper); overflow-wrap: anywhere; }
+.ks-state-shell-bar { padding: 0.625rem 0.875rem; background: var(--ks-chrome); color: var(--ks-muted); font: 0.75rem/1.5 var(--ks-mono); }
+.ks-state-shell-bar:first-child { border-block-end: 1px solid var(--ks-rule); }
+.ks-state-shell-bar:last-child { border-block-start: 1px solid var(--ks-rule); }
+.ks-state-page-content { padding: 1rem; }
+.ks-state-page-content > header p { margin-block: 0.25rem 0.875rem; font-size: 0.8125rem; color: var(--ks-muted); }
+.ks-state-page-content > .ui-state-region { border: 1px solid var(--ks-rule); }
+.ks-state-summary { padding: 1rem; }
+.ks-state-summary h4 { margin: 0; font-size: 0.875rem; }
+.ks-state-summary > p { max-inline-size: 65ch; margin-block: 0.375rem 0.875rem; color: var(--ks-muted); font-size: 0.8125rem; }
+.ks-state-summary dl { display: flex; flex-wrap: wrap; gap: 0.75rem 2rem; margin: 0 0 0.875rem; font-size: 0.8125rem; }
+.ks-state-summary dt { color: var(--ks-muted); }
+.ks-state-summary dd { margin: 0; }
+.ks-state-context { margin-block-start: 0.875rem; color: var(--ks-muted); font-size: 0.8125rem; }
+.ks-state-usage { margin-block-start: 1rem; font-size: 0.8125rem; }
+.ks-state-usage > summary { padding-block: 0.625rem; cursor: pointer; font-weight: 650; }
+.ks-state-usage p { margin-block: 0.5rem; color: var(--ks-muted); }
+.ks-state-usage pre { max-inline-size: 100%; padding: 0.75rem; border: 1px solid var(--ks-rule); background: var(--ks-paper); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.75rem; }

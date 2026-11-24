@@ -59,9 +59,9 @@ async function assertSection(page, name) {
     assert.match(await page.getByRole('main').innerText(), /fixture/i)
     return
   }
-  if (name === 'Packets') {
+  if (name === 'Packets' || name === 'Channels') {
     assert.ok(await page.getByRole('contentinfo').isVisible())
-    await page.getByRole('region', { name: 'Packets workspace', exact: true }).waitFor()
+    await page.getByRole('region', { name: `${name} workspace`, exact: true }).waitFor()
     assert.match(await page.getByRole('main').innerText(), /fixture/i)
     return
   }
@@ -249,8 +249,8 @@ test('small and enlarged-text layouts scroll content clear of the bottom navigat
   for (const width of [320, 768, 1024]) {
     await withShell({ viewport: { width, height: 600 } }, async (page) => {
       await assertNoOverflow(page)
-      await page.getByRole('navigation').getByRole('link', { name: 'Channels', exact: true }).click()
-      await assertSection(page, 'Channels')
+      await page.getByRole('navigation').getByRole('link', { name: 'Nodes', exact: true }).click()
+      await assertSection(page, 'Nodes')
       await page.evaluate(() => {
         document.documentElement.style.fontSize = '20px'
         const content = document.querySelector('.app-section-message')

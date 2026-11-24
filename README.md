@@ -19,12 +19,19 @@ and [persistence](projects/Persistence/README.md) for current integration limits
 
 ## Run
 
-Requires mise, .NET **11.0.100**, Podman, and a trusted ASP.NET Core development
-certificate. Aspire **13.6.5** is pinned; no password or runtime exports are needed.
+Requires mise, Podman, and a trusted ASP.NET Core development certificate. From
+the repository root, install the tool versions pinned in `mise.toml` and start
+Aspire with the repository launcher:
 
 ```sh
+mise install
 ./aspire.sh
 ```
+
+`mise.toml` pins .NET **11.0.100** to match `global.json`. `./aspire.sh` defaults
+to `run` and launches Aspire **13.6.5** through that SDK. Use it instead of
+`mise exec -- aspire run`, which can still select a globally installed Aspire
+CLI and build with the system .NET SDK.
 
 | Tool | Address |
 | --- | --- |

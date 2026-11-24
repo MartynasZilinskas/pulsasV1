@@ -29,7 +29,7 @@ export function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const kitchenSinkSelected = pathname === '/kitchen-sink' || pathname.startsWith('/kitchen-sink/')
   const mapSelected = pathname === '/map' || pathname.startsWith('/map/')
-  const workspaceSelected = mapSelected || pathname === '/packets' || pathname.startsWith('/packets/')
+  const workspaceSelected = mapSelected || ['/packets', '/channels'].some(to => pathname === to || pathname.startsWith(`${to}/`))
   const overflowSelected = kitchenSinkSelected || sections.slice(4).some(({ to }) => pathname === to || pathname.startsWith(`${to}/`))
 
   return (

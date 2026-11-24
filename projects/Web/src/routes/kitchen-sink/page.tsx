@@ -17,6 +17,8 @@ import { PacketPathSpecimens } from './packet-path-specimens'
 import { PacketTrafficSpecimens } from './packet-traffic-specimens'
 import { PacketTypeSpecimens } from './packet-type-specimens'
 import { SearchableMultiSelectSpecimen } from './searchable-multi-select-specimen'
+import { GenericStateSpecimens } from './generic-state-specimens'
+import { ChannelSpecimens } from './channel-specimens'
 import { ChannelKindSpecimens, LiveStatusSpecimens, MeshBrandSpecimens } from './static-specimens'
 import './kitchen-sink.css'
 import './map-specimens.css'
@@ -36,11 +38,13 @@ const sizes = [
 const specimenIndex = [
   { id: 'ks-live-status-heading', label: 'Status' },
   { id: 'ks-channels-heading', label: 'Channels' },
+  { id: 'ks-chat-heading', label: 'Channel browser' },
   { id: 'ks-identity-heading', label: 'Node identity' },
   { id: 'ks-packets-heading', label: 'Packet badges' },
   { id: 'ks-filter-controls', label: 'Filters' },
   { id: 'ks-traffic-browser', label: 'Packet traffic' },
   { id: 'ks-path-heading', label: 'Path evidence' },
+  { id: 'ks-states-heading', label: 'Loading & failures' },
   { id: 'ks-map-heading', label: 'Map examples' },
   { id: 'ks-mesh-heading', label: 'Mesh icon' },
 ] as const
@@ -285,6 +289,7 @@ export function KitchenSinkPage() {
           <div className="ks-specimens">
             <LiveStatusSpecimens />
             <ChannelKindSpecimens />
+            <ChannelSpecimens />
             <NodeIdentityPreview identity={identity} onRole={setRole} onObserver={setObserver} onWarning={setWarning} />
             <NodeIdentityContext identity={identity} />
             <RoleSpecimens />
@@ -292,6 +297,7 @@ export function KitchenSinkPage() {
             <div id="ks-filter-controls"><SearchableMultiSelectSpecimen /></div>
             <div id="ks-traffic-browser"><PacketTrafficSpecimens /></div>
             <PacketPathSpecimens />
+            <GenericStateSpecimens />
             <MapExamplesSection />
             <MeshBrandSpecimens />
           </div>

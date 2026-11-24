@@ -49,7 +49,7 @@ body:has(.app-shell) { margin: 0; }
 .app-shell-workspace:has(> .app-footer) { grid-template-rows: auto minmax(0, 1fr) auto; }
 .app-shell-workspace > .app-footer { display: flex; }
 .app-shell .app-content-workspace { min-block-size: 0; padding: 0; }
-.app-footer { display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-block-size: 2.5rem; border-block-start: 1px solid var(--ks-rule); padding: 0.5rem 1.5rem; color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); }
+.app-footer { display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-block-size: 1.875rem; border-block-start: 1px solid var(--ks-rule); padding: 0.25rem 1.5rem; color: var(--ks-muted); font: 0.6875rem/1.5 var(--ks-mono); }
 .app-section { max-inline-size: 44rem; }
 .app-section h1 { padding-block-end: 1rem; border-block-end: 1px solid var(--ks-rule); font-size: 1.75rem; line-height: 1.25; font-weight: 680; letter-spacing: -0.025em; }
 .app-section-message { padding-block-start: 2rem; }

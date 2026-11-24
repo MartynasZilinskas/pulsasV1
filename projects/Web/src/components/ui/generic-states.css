@@ -1,0 +1,48 @@
+.ui-state-region { position: relative; min-inline-size: 0; min-block-size: 0; }
+.ui-state-region:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: -2px; }
+.ui-state-content { display: flow-root; min-inline-size: 0; }
+.ui-state-region:not([data-state='ready']) > .ui-state-content { visibility: hidden; }
+.ui-state-layer { position: absolute; inset: 0; min-inline-size: 0; min-block-size: 0; }
+.ui-state {
+  box-sizing: border-box;
+  display: grid;
+  align-items: safe center;
+  justify-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: auto;
+  padding: 1rem;
+  background: var(--ks-paper);
+  color: var(--ks-ink);
+  font: 0.875rem/1.5 var(--ks-sans);
+  overflow-wrap: anywhere;
+}
+.ui-state-message { inline-size: min(100%, 30rem); padding: 0.25rem; }
+.ui-page-failure .ui-state-message { inline-size: min(100%, 34rem); }
+.ui-state-title { margin: 0; font-size: 1rem; line-height: 1.4; font-weight: 650; }
+.ui-page-failure .ui-state-title { font-size: 1.25rem; }
+.ui-state-description { margin: 0.375rem 0 0; color: var(--ks-muted); }
+.ui-state-retry {
+  min-block-size: 2.75rem;
+  max-inline-size: 100%;
+  margin-block-start: 0.875rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--ks-control-edge);
+  border-radius: var(--ks-radius);
+  background: var(--ks-paper);
+  color: var(--ks-ink);
+  font: 650 0.8125rem/1.5 var(--ks-sans);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.ui-state-retry:hover { background: var(--ks-ground); }
+.ui-state-retry:active { background: var(--ks-accent-wash); }
+.ui-state-retry:focus-visible { outline: 2px solid var(--ks-focus); outline-offset: 3px; }
+.ui-state-progress { display: grid; gap: 0.75rem; color: var(--ks-muted); }
+.ui-state-track { block-size: 0.1875rem; overflow: hidden; background: var(--ks-rule); }
+.ui-state-indicator { inline-size: 35%; block-size: 100%; background: var(--ks-accent); animation: ui-state-loading 1.3s ease-in-out infinite alternate; }
+@keyframes ui-state-loading { from { transform: translateX(0); } to { transform: translateX(185%); } }
+@media (prefers-reduced-motion: reduce) { .ui-state-indicator { animation: none; inline-size: 100%; } }
+@media (forced-colors: active) { .ui-state-indicator { background: Highlight; } .ui-state-track { background: Canvas; border: 1px solid GrayText; } }

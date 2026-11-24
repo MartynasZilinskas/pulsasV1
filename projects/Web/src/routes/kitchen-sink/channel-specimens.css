@@ -1,0 +1,8 @@
+.ks-channel-specimens { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); border: 1px solid var(--ks-rule); background: var(--ks-paper); }
+.ks-channel-directory { border-inline-end: 1px solid var(--ks-rule); background: var(--ks-chrome); }
+.ks-channel-directory, .ks-channel-messages { min-inline-size: 0; }
+.ks-channel-specimens h3 { margin: 0; padding: 0.75rem 1rem; border-block-end: 1px solid var(--ks-rule); font-size: 0.8125rem; }
+.ks-channel-empty, .ks-channel-selection { margin: 0; padding: 1rem; color: var(--ks-muted); font-size: 0.75rem; }
+.ks-channel-long-content { min-inline-size: 0; margin-block-start: 1rem; border: 1px solid var(--ks-rule); background: var(--ks-paper); }
+.ks-channel-long-content h3 { margin: 0; padding: 0.75rem 1rem; font-size: 0.8125rem; }
+@media (max-width: 47.999rem) { .ks-channel-specimens { grid-template-columns: minmax(0, 1fr); } .ks-channel-directory { border-inline-end: 0; border-block-end: 1px solid var(--ks-rule); } }

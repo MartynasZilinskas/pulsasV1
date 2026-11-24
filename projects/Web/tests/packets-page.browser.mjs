@@ -83,6 +83,30 @@ async function noDocumentOverflow(page) {
   assert.ok(Math.abs(footerBox.y + footerBox.height - bottom) < 1, 'Bottom bar sits at the workspace bottom')
 }
 
+test('credit footer stays compact without clipping on desktop, mobile, and enlarged text', async () => {
+  for (const width of [1440, 390, 320]) {
+    for (const fontSize of [16, 20]) {
+      await withPackets({ viewport: { width, height: 900 }, isMobile: width < 1024, hasTouch: width < 1024 }, async page => {
+        await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px` }, fontSize)
+        await noDocumentOverflow(page)
+        const footer = page.getByRole('contentinfo')
+        assert.match(await footer.innerText(), /Pulsas\s*·\s*Atviras Tinklas/)
+        const bounds = await footer.boundingBox()
+        const scale = fontSize / 16
+        assert.ok(Math.abs(bounds.height - 30 * scale) < 1, `Credit footer must be 30px at standard text size and scale with text; at ${width}px / ${fontSize}px text got ${bounds.height}px`)
+        assert.ok(await footer.evaluate((node, size) => {
+          const style = getComputedStyle(node)
+          const box = node.getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(node)
+          return parseFloat(style.fontSize) === size * 0.6875
+            && [...range.getClientRects()].every(rect => rect.x >= box.x && rect.right <= box.right && rect.y >= box.y && rect.bottom <= box.bottom)
+        }, fontSize), 'Footer typography must remain readable and fully contained')
+      })
+    }
+  }
+})
+
 test('desktop packets fills the viewport with independently scrolling left filters and history', async () => {
   await withPackets({}, async page => {
     await noDocumentOverflow(page)
